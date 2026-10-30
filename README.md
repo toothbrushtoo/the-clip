@@ -31,8 +31,9 @@ Every gym tracker only works  on one thing: a bar, or a specific machine, or you
 - Board: Seeed XIAO nRF52840 Sense (BLE + built-in IMU)
 - Battery: 3.7 V 250 mAh LiPo, charged over USB-C
 - Mount: silicone/velcro strap for round bars + magnets for flat steel (machine arms, weight stacks)
-- Target size: about 35 × 25 × 12 mm
+- Target size: about 35 × 25 × 13 mm
 - Enclosure: 3D printed
+- Sketches: hardware/sketches/
   
 ## Software
 
@@ -58,5 +59,5 @@ The IMU streams acceleration over BLE. The firmware figures out which way gravit
 
 ## Progress 
 
-- Day 1 (Oct 29): Decided on the project, wrote the list of things it can do and finished the ReadME, picked the board (this was a hard one haha) picked a big battery for demo day safety set a size target which is realistic (35 x 25 x 12) mm, set up the whole repo, made sketches and plans. App will be built on GitHub actions (free macOS runner) installed with sideloadly. Ordered all parts
+- Day 1 (Oct 29): Decided on the project, wrote the list of things it can do and finished the ReadME, picked the board (this was a hard one haha) picked a big battery for demo day safety set a size target which is realistic (35 x 25 x 13) mm, set up the whole repo, made sketches and plans. App will be built on GitHub actions (free macOS runner) installed with sideloadly. Ordered all parts
 
