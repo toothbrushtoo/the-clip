@@ -42,7 +42,7 @@ Every gym tracker only works  on one thing: a bar, or a specific machine, or you
 
 ## How it works
 
-The IMU streams acceleration over BLE. The firmware figures out which way gravity is pointing, so the clip works no matter how its mounted, then integrates acceleration into velocity  to find each rep. The app does the counting, the set detection and the match.
+The IMU streams acceleration over BLE. The firmware figures out which way gravity is pointing, so the clip works no matter how its mounted, then integrates acceleration into velocity  to find each rep. The app does the counting, the set detection and the math.
 
 ## Repo layout
 - `firmware/`   - code that runs on the clip
@@ -54,7 +54,7 @@ The IMU streams acceleration over BLE. The firmware figures out which way gravit
 
 - Where do i 3D print the case?
 - Is a 250 mAh battery enough for a full week of gym sessions (and whats the power draw)
-- Will the strap hold the clip steady on a bar or will it rotate during during a heavy set?
+- Will the strap hold the clip steady on a bar or will it rotate during a heavy set?
 
 ## Progress 
 
