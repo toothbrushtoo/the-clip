@@ -1,2 +1,61 @@
 # the-clip
-One clip that turns any gym equipment into a smart machine 
+
+One clip that turns any gym equipment into a smart machine.
+
+A small sensor you clip on a barbell, dumbbell,  cable stack, or machine arm. It counts your reps and sets, measures how fast you moved the weight, and sends it all to an iOS app. The app also builds you a workout from the muscle groups you pick.
+
+Built for Hack Club Fallen (Oct-Dec 2026).
+
+## Why
+
+Every gym tracker only works  on one thing: a bar, or a specific machine, or your wrist. I wanted one device that works on everything in the gym, so i never have to count reps or type them into a phone between sets.
+
+## What it does
+
+- Counts reps and sets automatically
+- Measures rep tempo and bar speed
+- Calculates joules per rep on free weights (you enter the load once)
+- Works in any orientation, so it doesnt matter how you clip it on
+- Clips to: barbell, dumbbell, cable stack, machine arm
+- iOS app: live rep counter, set summary, history
+- Workout builder: pick muscle groups + the equipment you have, get a workout
+
+## What it does NOT do (yet!)
+
+- Auto-detect which exercise you're doing
+- Measure force or strain
+- Progression / coaching logic
+
+## Hardware
+
+- Board: Seeed XIAO nRF52840 Sense (BLE + built-in IMU)
+- Battery: 3.7 V 250 mAh LiPo, charged over USB-C
+- Mount: silicone/velcro strap for round bars + magnets for flat steel (machine arms, weight stacks)
+- Target size: about 35 × 25 × 12 mm
+- Enclosure: 3D printed
+  
+## Software
+
+- Firmware: Arduino / C++ on the nRF52840
+- App: SwiftUI + CoreBluetooth
+- Exercise data: free-exercise-db (open source)
+
+## How it works
+
+The IMU streams acceleration over BLE. The firmware figures out which way gravity is pointing, so the clip works no matter how its mounted, then integrates acceleration into velocity  to find each rep. The app does the counting, the set detection and the match.
+
+## Repo layout
+- `firmware/   - code that runs on the clip
+- `app/        - the iOS app
+- `demo/       - videos, test numbers, stuff for the final demo
+
+## Open questions
+
+- Where do i 3D print the case?
+- Is a 250 mAh battery enough for a full week of gym sessions (and whats the power draw)
+- Will the strap hold the clip steady on a bar or will it rotate during during a heavy set?
+
+## Progress 
+
+- Day 1 (Oct 29): Decided on the project, wrote the list of things it can do and finished the ReadME, picked the board (this was a hard one haha) picked a big battery for demo day safety set a size target which is realistic (35 x 25 x 12) mm, set up the whole repo, made sketches and plans.
+
