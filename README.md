@@ -45,9 +45,10 @@ Every gym tracker only works  on one thing: a bar, or a specific machine, or you
 The IMU streams acceleration over BLE. The firmware figures out which way gravity is pointing, so the clip works no matter how its mounted, then integrates acceleration into velocity  to find each rep. The app does the counting, the set detection and the match.
 
 ## Repo layout
-- `firmware/   - code that runs on the clip
-- `app/        - the iOS app
-- `demo/       - videos, test numbers, stuff for the final demo
+- `firmware/`   - code that runs on the clip
+- `app/`        - the iOS app
+- `demo/`       - videos, test numbers, stuff for the final demo
+- `hardware/`   - the actual parts
 
 ## Open questions
 
@@ -57,5 +58,5 @@ The IMU streams acceleration over BLE. The firmware figures out which way gravit
 
 ## Progress 
 
-- Day 1 (Oct 29): Decided on the project, wrote the list of things it can do and finished the ReadME, picked the board (this was a hard one haha) picked a big battery for demo day safety set a size target which is realistic (35 x 25 x 12) mm, set up the whole repo, made sketches and plans.
+- Day 1 (Oct 29): Decided on the project, wrote the list of things it can do and finished the ReadME, picked the board (this was a hard one haha) picked a big battery for demo day safety set a size target which is realistic (35 x 25 x 12) mm, set up the whole repo, made sketches and plans. App will be built on GitHub actions (free macOS runner) installed with sideloadly. Ordered all parts
 
