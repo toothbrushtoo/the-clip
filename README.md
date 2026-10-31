@@ -16,15 +16,18 @@ Every gym tracker only works  on one thing: a bar, or a specific machine, or you
 - Measures rep tempo and bar speed
 - Calculates joules per rep on free weights (you enter the load once)
 - Works in any orientation, so it doesnt matter how you clip it on
-- Clips to: barbell, dumbbell, cable stack, machine arm
+- Clips to: barbell, dumbbell, cable stack, machine arm, weight stack (magnets grab the steel stack; the strap is for round bars)
 - iOS app: live rep counter, set summary, history
 - Workout builder: pick muscle groups + the equipment you have, get a workout
+- Find my clip: flashes the LED and shows Bluetooth signal strength in the app
 
 ## What it does NOT do (yet!)
 
 - Auto-detect which exercise you're doing
 - Measure force or strain
 - Progression / coaching logic
+- Resistance bands (nothing to clip to)
+- Buzzer for find-my-clip (v0.3 if the case has room!)
 
 ## Hardware
 
@@ -40,6 +43,7 @@ Every gym tracker only works  on one thing: a bar, or a specific machine, or you
 - Firmware: Arduino / C++ on the nRF52840
 - App: SwiftUI + CoreBluetooth
 - Exercise data: free-exercise-db (open source)
+- App build: Github Actions (free macOS runner),installed with Sideloadly
 
 ## How it works
 
