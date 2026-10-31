@@ -28,3 +28,17 @@ Phone accelerometer data recorded with the phyphox app ("Acceleration with g") ~
 ## To do
 - Re-record curl_normal with a rigid mount
 - Add the minimum-swing rule so the small wiggles at the end of sideways_10 dont count
+
+## Counter v0.1 results (threshold sweep, min swing 1.5)
+
+| threshold | curl_test_3 (3) | curl_normal_7 (7) | junk_walk (0) | sideways_10 (10) |
+|---|---|---|---|---|
+| 0.4 | 2 | 0 | 0 | 3 |
+| 0.6 | 2 | 0 | 0 | 7 |
+| 0.8 | 2 | 0 | 0 | 10 |
+| 1.0 | 2 | 0 | 0 | 3 |
+
+Chose threshold 0.8, min swing 1.5. Sideways and walking are perfect.
+curl_test_3 misses the first rep (file starts mid-motion).
+curl_normal_7 counts 0: its swings are smaller than the min swing rule,
+which supports the loose-phone theory. Re-record with a rigid mount.
