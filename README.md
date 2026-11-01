@@ -75,5 +75,5 @@ The IMU streams acceleration over BLE. The firmware figures out which way gravit
 
 - Day 1 (Oct 29): Decided on the project, wrote the list of things it can do and finished the ReadME, picked the board (this was a hard one haha) picked a big battery for demo day safety set a size target which is realistic (35 x 25 x 13) mm, set up the whole repo, made sketches and plans. App will be built on GitHub actions (free macOS runner) installed with sideloadly. Ordered all parts
 - Day 2 (Oct 30): finished testing lots of stuff with phyohox wrote a py program that can count reps from the graph.
-- Day 3
+- Day 3 (Oct 31): finished the app skeleton made huge progress with the swift stuff and im really happy with it board is in missauga and coming later soon everything else is fine and tommorow case in tinkercard, also added changes to repo, aswell as many shots of progress in demo and app which im happy with, made a cool image to explain how it works!
 
