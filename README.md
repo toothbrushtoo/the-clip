@@ -1,6 +1,11 @@
+<p align="center">
+  <img src="demo/app-v0.2-set-history.png" width="220">
+  &nbsp;&nbsp;
+  <img src="hardware/sketches/v0.2-oct30.jpeg" width="420">
+</p>
 # the-clip
 
-One clip that turns any gym equipment into a smart machine.
+**One clip that turns any gym equipment into a smart machine.**
 
 A small sensor you clip on a barbell, dumbbell,  cable stack, or machine arm. It counts your reps and sets, measures how fast you moved the weight, and sends it all to an iOS app. The app also builds you a workout from the muscle groups you pick.
 
@@ -64,4 +69,6 @@ The IMU streams acceleration over BLE. The firmware figures out which way gravit
 ## Progress 
 
 - Day 1 (Oct 29): Decided on the project, wrote the list of things it can do and finished the ReadME, picked the board (this was a hard one haha) picked a big battery for demo day safety set a size target which is realistic (35 x 25 x 13) mm, set up the whole repo, made sketches and plans. App will be built on GitHub actions (free macOS runner) installed with sideloadly. Ordered all parts
+- Day 2 (Oct 30): finished testing lots of stuff with phyohox wrote a py program that can count reps from the graph.
+- Day 3
 
