@@ -10,6 +10,7 @@ struct ContentView: View {
             Text("\(session.reps)")
                 .font(.system(size: 160, weight: .bold, design: .rounded))
                 .monospacedDigit()
+                .foregroundStyle(.green)
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
             Text("reps")
