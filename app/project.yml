@@ -2,20 +2,20 @@ name: Clip
 options:
   bundleIdPrefix: com.misha
   deploymentTarget:
-  iOS: "16.0"
+    iOS: "16.0"
 targets:
-Clip:
-  type: application
-  platform: iOS
-  sources: [CLip]
-  info:
-    path: Clip/info.plist
-    properties
-      UILaunchScreen: {}
-      NSBluetoothAlwaysUsageDescription: CLip connects to your rep sensor over Bluetooth.
-settings:
-  base:
-    PRODUCT_BUNDLE_IDENTIFIER: com.misha.clip
-    MARKETING_VERSION: "0.1"
-    CURRENT_PROJECT_VERSION: "1"
-    TARGETED_DEVICE_FAMILY: "1"
+  Clip:
+    type: application
+    platform: iOS
+    sources: [Clip]
+    info:
+      path: Clip/Info.plist
+      properties:
+        UILaunchScreen: {}
+        NSBluetoothAlwaysUsageDescription: Clip connects to your rep sensor over Bluetooth.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.misha.clip
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1"
