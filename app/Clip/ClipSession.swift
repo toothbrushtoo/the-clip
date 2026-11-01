@@ -32,7 +32,7 @@ final class ClipSession: ObservableObject {
     }
 
     private func recordSet() {
-        guard let start = setStart else { return }
+        guard let start = setStart, reps > 0 else { return }
         let end = Date()
         let finished = WorkoutSet(
             reps: reps,
