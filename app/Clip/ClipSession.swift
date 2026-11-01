@@ -29,6 +29,8 @@ final class ClipSession: ObservableObject {
         timer?.invalidate()
         timer = nil
         recordSet()
+        func clearHistory() {
+            sets.removeAll()
     }
 
     private func recordSet() {
