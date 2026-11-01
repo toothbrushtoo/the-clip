@@ -10,10 +10,29 @@ struct ContentView: View {
             Text("\(session.reps)")
                 .font(.system(size: 160, weight: .bold, design: .rounded))
                 .monospacedDigit()
+                .minimumScaleFactor(0.5)
+                .lineLimit(1)
             Text("reps")
                 .font(.title2)
                 .foregroundStyle(.secondary)
-            Spacer()
+
+            if !session.sets.isEmpty {
+                List(session.sets) { set in
+                    HStack {
+                        Text("\(set.reps) reps")
+                            .fontWeight(.semibold)
+                        Spacer()
+                        Text(formatDuration(set.seconds))
+                            .foregroundStyle(.secondary)
+                        Text(set.date, style: .time)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .listStyle(.plain)
+            } else {
+                Spacer()
+            }
+
             if !session.connected {
                 Button("Connect") { session.connectFake() }
                     .buttonStyle(.borderedProminent)
@@ -26,5 +45,10 @@ struct ContentView: View {
             }
         }
         .padding()
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds.rounded())
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }

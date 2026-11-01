@@ -5,8 +5,10 @@ final class ClipSession: ObservableObject {
     @Published var reps = 0
     @Published var connected = false
     @Published var inSet = false
+    @Published var sets: [WorkoutSet] = []
 
     private var timer: Timer?
+    private var setStart: Date?
 
     func connectFake() {
         connected = true
@@ -15,6 +17,7 @@ final class ClipSession: ObservableObject {
     func startSet() {
         reps = 0
         inSet = true
+        setStart = Date()
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             self?.reps += 1
@@ -25,6 +28,19 @@ final class ClipSession: ObservableObject {
         inSet = false
         timer?.invalidate()
         timer = nil
+        recordSet()
+    }
+
+    private func recordSet() {
+        guard let start = setStart else { return }
+        let end = Date()
+        let finished = WorkoutSet(
+            reps: reps,
+            seconds: end.timeIntervalSince(start),
+            date: start
+        )
+        sets.insert(finished, at: 0)
+        setStart = nil
     }
 
     deinit {
