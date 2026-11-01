@@ -1,11 +1,14 @@
 <p align="center">
-  <img src="demo/app-v0.2-set-history.png" width="220">
+  <img src="demo/app-v0.1-reps-up.png" width="220">
   &nbsp;&nbsp;
   <img src="hardware/sketches/v0.2-oct30.jpeg" width="420">
 </p>
+
 # the-clip
 
 **One clip that turns any gym equipment into a smart machine.**
+
+Status, Oct 31: app v0.3 running on iPhone with set history · rep counter working on phone data (10/10 sideways, 0 false reps walking) · board, battery and switch ordered, arriving the week of Nov 5 · case v0.2 drawn.
 
 A small sensor you clip on a barbell, dumbbell,  cable stack, or machine arm. It counts your reps and sets, measures how fast you moved the weight, and sends it all to an iOS app. The app also builds you a workout from the muscle groups you pick.
 
@@ -36,12 +39,12 @@ Every gym tracker only works  on one thing: a bar, or a specific machine, or you
 
 ## Hardware
 
-- Board: Seeed XIAO nRF52840 Sense (BLE + built-in IMU)
+- Board: Seeed XIAO nRF52840 Sense Plus (BLE + built-in IMU)
 - Battery: 3.7 V 250 mAh LiPo, charged over USB-C
-- Mount: silicone/velcro strap for round bars + magnets for flat steel (machine arms, weight stacks)
-- Target size: about 35 × 25 × 13 mm
+- Mount: 20 mm hook-and-loop strap for round bars + magnets for flat steel (machine arms, weight stacks)
+- Target size: about 37 × 25 × 13 mm (v0.2)
 - Enclosure: 3D printed
-- Sketches: hardware/sketches/
+- Sketches: hardware/sketches/ (v0.1 Oct 29, v0.2 Oct 30)
   
 ## Software
 
@@ -51,6 +54,8 @@ Every gym tracker only works  on one thing: a bar, or a specific machine, or you
 - App build: Github Actions (free macOS runner),installed with Sideloadly
 
 ## How it works
+
+<p align="center"><img src="demo/how-it-works.png" width="520"></p>
 
 The IMU streams acceleration over BLE. The firmware figures out which way gravity is pointing, so the clip works no matter how its mounted, then integrates acceleration into velocity  to find each rep. The app does the counting, the set detection and the math.
 
