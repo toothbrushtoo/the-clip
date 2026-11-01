@@ -29,6 +29,10 @@ struct ContentView: View {
                     }
                 }
                 .listStyle(.plain)
+                Button("Clear history", role: .destructive) {
+                    session.clearHistory()
+                }
+                .buttonStyle(.bordered)
             } else {
                 Spacer()
             }
