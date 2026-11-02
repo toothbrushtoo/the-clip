@@ -2,9 +2,12 @@ import SwiftUI
 
 @main
 struct ClipApp: App {
-  var body: some Scene {
-    WindowGroup {
-      ContentView()
-    }
-  }
+      @StateObject private var store = WorkoutStore()
+
+      var body: some Scene {
+                WindowGroup {
+                              ContentView()
+                                  .environmentObject(store)
+                }
+      }
 }
