@@ -2,52 +2,54 @@ import Foundation
 import Combine
 
 final class ClipSession: ObservableObject {
-    @Published var reps = 0
-    @Published var connected = false
-    @Published var inSet = false
-    @Published var sets: [WorkoutSet] = []
+      enum Source: String, CaseIterable { case fake, phone }
 
-    private var timer: Timer?
-    private var setStart: Date?
+      @Published var reps = 0
+      @Published var connected = false
+      @Published var inSet = false
+      @Published var source: Source = .fake
+      @Published var sets: [WorkoutSet] = []
 
-    func connectFake() {
-        connected = true
-    }
+      let motion = MotionCounter()
+      private var timer: Timer?
+      private var setStart: Date?
+      private var bag = Set<AnyCancellable>()
 
-    func startSet() {
-        reps = 0
-        inSet = true
-        setStart = Date()
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            self?.reps += 1
-        }
-    }
+      func connectFake() { connected = true }
 
-    func endSet() {
-        inSet = false
-        timer?.invalidate()
-        timer = nil
-        recordSet()
-    }
+      func startSet() {
+                reps = 0
+                inSet = true
+                setStart = Date()
+                timer?.invalidate()
+                switch source {
+                          case .fake:
+                              timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+                                                                                                                  self?.reps += 1
+                                                                                                 }
+                          case .phone:
+                              motion.start()
+                              motion.$reps
+                                  .receive(on: RunLoop.main)
+                                  .sink { [weak self] r in self?.reps = r }
+                                  .store(in: &bag)
+                }
+      }
 
-    func clearHistory() {
-            sets.removeAll()
-    }
+      func endSet() {
+                inSet = false
+                timer?.invalidate(); timer = nil
+                motion.stop(); bag.removeAll()
+                recordSet()
+      }
 
-    private func recordSet() {
-        guard let start = setStart, reps > 0 else { return }
-        let end = Date()
-        let finished = WorkoutSet(
-            reps: reps,
-            seconds: end.timeIntervalSince(start),
-            date: start
-        )
-        sets.insert(finished, at: 0)
-        setStart = nil
-    }
+      func clearHistory() { sets.removeAll() }
 
-    deinit {
-        timer?.invalidate()
-    }
+      private func recordSet() {
+                guard let start = setStart, reps > 0 else { return }
+                sets.insert(WorkoutSet(reps: reps, seconds: Date().timeIntervalSince(start), date: start), at: 0)
+                setStart = nil
+      }
+
+      deinit { timer?.invalidate(); motion.stop() }
 }
