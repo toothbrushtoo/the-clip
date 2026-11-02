@@ -2,7 +2,7 @@ name: Clip
 options:
   bundleIdPrefix: com.misha
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "17.0"
 targets:
   Clip:
     type: application
@@ -11,6 +11,7 @@ targets:
     info:
       path: Clip/Info.plist
       properties:
+        NSMotionUsageDescription: Clip uses the phone's motion sensor to count reps when no clip is connected.
         UILaunchScreen: {}
         NSBluetoothAlwaysUsageDescription: Clip connects to your rep sensor over Bluetooth.
     settings:
