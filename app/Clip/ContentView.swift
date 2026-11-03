@@ -7,6 +7,8 @@ struct ContentView: View {
                 .tabItem { Label("Workout", systemImage: "figure.strengthtraining.traditional") }
             WorkoutsView()
                 .tabItem { Label("Workouts", systemImage: "list.bullet.rectangle") }
+            HistoryView()
+                .tabItem { Label("History", systemImage: "clock") }
         }
     }
 }

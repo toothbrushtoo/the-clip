@@ -8,9 +8,12 @@ struct SessionView: View {
             Picker("Source", selection: $session.source) {
                 Text("Fake clip").tag(ClipSession.Source.fake)
                 Text("Phone motion").tag(ClipSession.Source.phone)
+                Text("Clip").tag(ClipSession.Source.clip)
             }
                 .pickerStyle(.segmented)
                 .disabled(session.inSet)
+
+            if session.source == .clip { ClipStatusView() }
 
             Text(session.connected ? "Connected (\(session.source.rawValue))" : "Not connected")
                 .foregroundStyle(.secondary)

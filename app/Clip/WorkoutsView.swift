@@ -8,11 +8,15 @@ struct WorkoutsView: View {
         NavigationStack {
             List {
                 ForEach(store.workouts) { workout in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(workout.name).font(.headline)
-                        Text(workout.exercises.joined(separator: " · "))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                    NavigationLink {
+                        WorkoutRunView(workout: workout)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(workout.name).font(.headline)
+                            Text(workout.exercises.joined(separator: " · "))
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
                     .onDelete(perform: store.remove)
