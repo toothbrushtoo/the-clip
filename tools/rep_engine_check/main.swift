@@ -13,7 +13,12 @@ struct Ref: Decodable {
     let period: Double?
     let gap: Double?
     let width: Int?
-    let `self`: Int?
+    let selfCount: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case file, `true`, generic, detector, threshold, period, gap, width
+        case selfCount = "self"
+    }
 }
 
 func loadCSV(_ path: String) -> [MotionSample] {
@@ -46,12 +51,12 @@ for r in refs {
         if let p = ProfileLearner.learn(samples: samples, targetReps: r.true) {
             let e2 = RepEngine(profile: p)
             for s in samples { e2.push(s) }
-            line += String(format: " %10@ %6d %6d", p.detector.rawValue, e2.reps, r.self ?? -1)
+            line += String(format: " %10@ %6d %6d", p.detector.rawValue, e2.reps, r.selfCount ?? -1)
             if p.detector.rawValue != r.detector { line += "  <-- detector mismatch"; failures += 1 }
             if let rt = r.threshold, abs(p.threshold - rt) > 1e-3 * max(1, rt) { line += String(format: "  <-- threshold %.4f vs %.4f", p.threshold, rt); failures += 1 }
             if let rg = r.gap, abs(p.minGap - rg) > 2e-3 { line += "  <-- gap mismatch"; failures += 1 }
             if let rw = r.width, p.quality != rw { line += "  <-- width \(p.quality) vs \(rw)"; failures += 1 }
-            if e2.reps != r.self { line += "  <-- self count mismatch"; failures += 1 }
+            if e2.reps != r.selfCount { line += "  <-- self count mismatch"; failures += 1 }
         } else {
             line += "  <-- learn failed"; failures += 1
         }
