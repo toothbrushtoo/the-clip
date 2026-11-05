@@ -240,7 +240,7 @@ struct TeachExerciseView: View {
             if let c = session.counter {
                 Text(c == .clipOnboard ? "No motion data from the clip. Upload the new firmware." : "\(c.rawValue) · \(ble.streamSamples) samples")
                     .font(.system(.footnote, design: .monospaced))
-                    .foregroundStyle(c == .clipOnboard ? .orange : .tertiary)
+                    .foregroundStyle(c == .clipOnboard ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
             }
 
             PillButton(title: "Done") { stopRecording() }
