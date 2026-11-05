@@ -1,0 +1,231 @@
+[
+ {
+  "file": "bent_row_10",
+  "true": 10,
+  "generic": 9,
+  "detector": "velocity",
+  "threshold": 0.0906,
+  "period": 1.587,
+  "gap": 0.4,
+  "width": 2,
+  "self": 10
+ },
+ {
+  "file": "curl_fast_10",
+  "true": 10,
+  "generic": 9,
+  "detector": "motion",
+  "threshold": 8.579,
+  "period": 1.034,
+  "gap": 0.4,
+  "width": 6,
+  "self": 10
+ },
+ {
+  "file": "curl_normal_7",
+  "true": 7,
+  "generic": 7,
+  "detector": "motion",
+  "threshold": 2.2688,
+  "period": 4.087,
+  "gap": 1.022,
+  "width": 24,
+  "self": 7
+ },
+ {
+  "file": "curl_pause_7",
+  "true": 7,
+  "generic": 7,
+  "detector": "velocity",
+  "threshold": 0.4602,
+  "period": 5.203,
+  "gap": 1.2,
+  "width": 30,
+  "self": 7
+ },
+ {
+  "file": "curl_rigid_10",
+  "true": 10,
+  "generic": 10,
+  "detector": "motion",
+  "threshold": 2.8895,
+  "period": 3.917,
+  "gap": 0.982,
+  "width": 14,
+  "self": 10
+ },
+ {
+  "file": "curl_slow_4",
+  "true": 4,
+  "generic": 3,
+  "detector": "velocity",
+  "threshold": 0.2792,
+  "period": 10.317,
+  "gap": 1.2,
+  "width": 22,
+  "self": 4
+ },
+ {
+  "file": "curl_test_3",
+  "true": 3,
+  "generic": 2,
+  "detector": "velocity",
+  "threshold": 0.1494,
+  "period": 2.014,
+  "gap": 0.503,
+  "width": 11,
+  "self": 3
+ },
+ {
+  "file": "goblet_squat_10",
+  "true": 10,
+  "generic": 10,
+  "detector": "velocity",
+  "threshold": 0.2792,
+  "period": 1.989,
+  "gap": 0.497,
+  "width": 22,
+  "self": 10
+ },
+ {
+  "file": "hammer_curl_10",
+  "true": 10,
+  "generic": 11,
+  "detector": "motion",
+  "threshold": 9.6817,
+  "period": 2.611,
+  "gap": 0.653,
+  "width": 5,
+  "self": 10
+ },
+ {
+  "file": "junk_carry",
+  "true": 0,
+  "generic": 23
+ },
+ {
+  "file": "junk_phone",
+  "true": 0,
+  "generic": 10
+ },
+ {
+  "file": "junk_walk",
+  "true": 0,
+  "generic": 2
+ },
+ {
+  "file": "knee_raise_10",
+  "true": 10,
+  "generic": 13,
+  "detector": "velocity",
+  "threshold": 0.7587,
+  "period": 2.27,
+  "gap": 0.568,
+  "width": 10,
+  "self": 10
+ },
+ {
+  "file": "lateral_raise_10",
+  "true": 10,
+  "generic": 10,
+  "detector": "motion",
+  "threshold": 7.602,
+  "period": 2.179,
+  "gap": 0.545,
+  "width": 5,
+  "self": 10
+ },
+ {
+  "file": "lunge_N",
+  "true": 0,
+  "generic": 5
+ },
+ {
+  "file": "overhead_tricep_10",
+  "true": 10,
+  "generic": 10,
+  "detector": "velocity",
+  "threshold": 0.4602,
+  "period": 2.2,
+  "gap": 0.55,
+  "width": 15,
+  "self": 10
+ },
+ {
+  "file": "pullup_6",
+  "true": 6,
+  "generic": 8,
+  "detector": "velocity",
+  "threshold": 0.6696,
+  "period": 3.274,
+  "gap": 0.818,
+  "width": 1,
+  "self": 6
+ },
+ {
+  "file": "pushup_10",
+  "true": 10,
+  "generic": 11,
+  "detector": "velocity",
+  "threshold": 0.4602,
+  "period": 2.4,
+  "gap": 0.6,
+  "width": 6,
+  "self": 10
+ },
+ {
+  "file": "shoulder_press_10",
+  "true": 10,
+  "generic": 10,
+  "detector": "velocity",
+  "threshold": 0.2792,
+  "period": 3.274,
+  "gap": 0.819,
+  "width": 2,
+  "self": 10
+ },
+ {
+  "file": "shrug_10",
+  "true": 10,
+  "generic": 8,
+  "detector": "motion",
+  "threshold": 2.8895,
+  "period": 1.727,
+  "gap": 0.432,
+  "width": 1,
+  "self": 10
+ },
+ {
+  "file": "sideways_10",
+  "true": 10,
+  "generic": 11,
+  "detector": "motion",
+  "threshold": 13.9152,
+  "period": 3.445,
+  "gap": 0.861,
+  "width": 1,
+  "self": 10
+ },
+ {
+  "file": "squat_bodyweight_10",
+  "true": 10,
+  "generic": 11,
+  "detector": "velocity",
+  "threshold": 0.4602,
+  "period": 2.119,
+  "gap": 0.53,
+  "width": 16,
+  "self": 10
+ },
+ {
+  "file": "tricep_kickback_11",
+  "true": 11,
+  "generic": 10,
+  "detector": "velocity",
+  "threshold": 0.2464,
+  "period": 1.848,
+  "gap": 0.462,
+  "width": 3,
+  "self": 11
+ }
+]

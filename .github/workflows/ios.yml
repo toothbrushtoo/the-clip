@@ -1,13 +1,17 @@
 name: iOS build
 on:
   push:
-    paths: ['app/**', '.github/workflows/ios.yml']
+    paths: ['app/**', 'tools/rep_engine_check/**', '.github/workflows/ios.yml']
   workflow_dispatch:
 jobs:
   build:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Check rep engine against the Python reference
+        run: |
+          swiftc -O -o /tmp/repcheck app/Clip/RepEngine.swift tools/rep_engine_check/main.swift
+          /tmp/repcheck hardware/data/phyphox tools/rep_engine_check/reference.json
       - name: install XcodeGen
         run: brew install xcodegen
       - name: Generate project
