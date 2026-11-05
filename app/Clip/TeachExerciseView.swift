@@ -178,8 +178,17 @@ struct TeachExerciseView: View {
                 ClipStatusView()
             }
 
+            if session.source == .clip && session.connected && !ble.streamSupported {
+                Text("This clip is running old firmware that can't send motion data, so it can't be taught. Upload firmware/clip from the repo, then try again.")
+                    .font(.system(.footnote, design: .rounded))
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+            }
+
             if session.connected {
                 PillButton(title: "Start") { beginRecording() }
+                    .opacity(canTeach ? 1 : 0.4)
+                    .disabled(!canTeach)
             } else {
                 PillButton(title: session.source == .clip ? "Connect clip" : "Use phone") { session.connect() }
                     .opacity(session.source == .clip && (ble.state == .scanning || ble.state == .connecting) ? 0.5 : 1)
@@ -188,6 +197,10 @@ struct TeachExerciseView: View {
         .onAppear {
             if session.source == .fake { session.source = .clip }
         }
+    }
+
+    private var canTeach: Bool {
+        session.source == .phone || ble.streamSupported
     }
 
     private var readyHint: String {
@@ -224,6 +237,11 @@ struct TeachExerciseView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.top, 30)
+            if let c = session.counter {
+                Text(c == .clipOnboard ? "No motion data from the clip. Upload the new firmware." : "\(c.rawValue) · \(ble.streamSamples) samples")
+                    .font(.system(.footnote, design: .monospaced))
+                    .foregroundStyle(c == .clipOnboard ? .orange : .tertiary)
+            }
 
             PillButton(title: "Done") { stopRecording() }
                 .opacity(session.reps >= 3 ? 1 : 0.4)

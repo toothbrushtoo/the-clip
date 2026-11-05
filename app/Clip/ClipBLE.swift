@@ -348,6 +348,9 @@ struct ClipStatusView: View {
             if let r = ble.rssi {
                 Text("\(r) dBm").monospacedDigit().foregroundStyle(.secondary)
             }
+            if ble.state == .connected && !ble.streamSupported {
+                Text("old firmware").foregroundStyle(.orange)
+            }
             Spacer()
         }
         .font(.subheadline)
