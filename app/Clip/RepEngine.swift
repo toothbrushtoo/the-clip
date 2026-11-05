@@ -28,6 +28,7 @@ struct ExerciseProfile: Codable, Equatable {
 
     var detector: Detector
     var threshold: Double
+    var frac: Double? = nil          // set for an adaptive threshold (frac × biggest recent swing)
     var amplitude: Double
     var period: Double
     var minGap: Double
@@ -236,8 +237,13 @@ final class RepEngine {
             .motion: ZigZag(tmin: RepConstants.accTmin, frac: 0.55),
             .velocity: ZigZag(tmin: RepConstants.velTmin, frac: 0.35)
         ]
-        if let p = profile {
-            zigzags[p.detector]?.fixed = p.threshold
+        if let p = profile, let zz = zigzags[p.detector] {
+            if let f = p.frac {
+                zz.frac = f
+                zz.fixed = nil
+            } else {
+                zz.fixed = p.threshold
+            }
             minGap = p.minGap
         }
     }
@@ -315,6 +321,11 @@ final class RepEngine {
 
 // MARK: - Learning from a teaching set
 
+enum LearnOutcome {
+    case learned(ExerciseProfile)
+    case failed(suggestedReps: Int?)
+}
+
 enum ProfileLearner {
     // Threshold sweep per detector: from the smallest swing worth counting to a huge one.
     static func grid(_ lo: Double, _ hi: Double, _ n: Int = 30) -> [Double] {
@@ -327,45 +338,105 @@ enum ProfileLearner {
         .velocity: grid(0.08, 3.0)
     ]
 
-    // Runs the engine once to get each detector's projected signal, sweeps a fixed threshold over
-    // it, and keeps the detector and threshold that reproduce the known count with the widest
-    // margin. The template is the average shape of one rep.
+    // Adaptive-threshold sweep: 0.15 … 0.80 of the biggest recent swing.
+    static let fracs: [Double] = (0..<14).map { 0.15 + 0.05 * Double($0) }
+
+    static let tmins: [ExerciseProfile.Detector: Double] = [
+        .rotation: RepConstants.rotTmin,
+        .motion: RepConstants.accTmin,
+        .velocity: RepConstants.velTmin
+    ]
+
+    private struct Candidate {
+        var profile: ExerciseProfile
+        var fixed: Bool
+        var width: Int
+        var margin: Double
+        var exact: Bool
+
+        // A fixed threshold generalises across tempo better than an adaptive one, so it wins
+        // whenever it reproduced the count exactly with some margin; adaptive is the fallback.
+        var rank: (Int, Int, Double) { (exact ? 1 : 0, (fixed && width >= 2) ? 1 : 0, margin) }
+
+        func beats(_ other: Candidate) -> Bool {
+            let a = rank, b = other.rank
+            if a.0 != b.0 { return a.0 > b.0 }
+            if a.1 != b.1 { return a.1 > b.1 }
+            return a.2 > b.2
+        }
+    }
+
     static func learn(samples: [MotionSample], targetReps: Int) -> ExerciseProfile? {
-        guard samples.count > 100, targetReps >= 3 else { return nil }
+        if case .learned(let p) = learnOutcome(samples: samples, targetReps: targetReps) { return p }
+        return nil
+    }
+
+    // Runs the engine once to get each detector's projected signal, then sweeps both a fixed
+    // threshold and an adaptive fraction over it, and keeps the detector and setting that
+    // reproduce the known count with the widest margin (margins compared as a fraction of each
+    // sweep's length). The template is the average shape of one rep. When nothing matches, the
+    // outcome carries the count the signal supports best, so the user can be asked about it.
+    static func learnOutcome(samples: [MotionSample], targetReps: Int) -> LearnOutcome {
+        guard samples.count > 100, targetReps >= 3 else { return .failed(suggestedReps: nil) }
         let signals = projectedSignals(samples)
         let times = samples.map(\.t)
-        var best: (profile: ExerciseProfile, exact: Bool, width: Int)?
+        var best: Candidate?
+        var stable: [Int: Double] = [:]
 
         for detector in RepConstants.detectors {
             let sig = signals[detector]!
-            let grid = grids[detector]!
-            guard let first = plateau(grid.map { replay(times, sig, threshold: $0, gap: 0.4).times.count }, target: targetReps) else { continue }
-            let firstTimes = replay(times, sig, threshold: grid[first.centre], gap: 0.4).times
-            let firstPeriod = firstTimes.count > 1 ? median(zip(firstTimes, firstTimes.dropFirst()).map { $1 - $0 }) : 2.0
-            let gap = min(1.2, max(0.4, 0.25 * firstPeriod))
-            guard let pick = plateau(grid.map { replay(times, sig, threshold: $0, gap: gap).times.count }, target: targetReps) else { continue }
-            let threshold = grid[pick.centre]
-            let result = replay(times, sig, threshold: threshold, gap: gap)
-            let period = result.times.count > 1 ? median(zip(result.times, result.times.dropFirst()).map { $1 - $0 }) : 2.0
-            let profile = ExerciseProfile(detector: detector,
-                                          threshold: threshold,
-                                          amplitude: median(result.swings),
-                                          period: period,
-                                          minGap: gap,
-                                          template: template(sig, times, repTimes: result.times, period: period),
-                                          repsTaught: targetReps,
-                                          quality: pick.width,
-                                          exact: pick.exact,
-                                          learnedAt: Date())
-            if let b = best {
-                if (pick.exact && !b.exact) || (pick.exact == b.exact && pick.width > b.width) {
-                    best = (profile, pick.exact, pick.width)
+            for fixedMode in [true, false] {
+                let grid = fixedMode ? grids[detector]! : fracs
+                func run(_ setting: Double, _ gap: Double) -> (times: [Double], swings: [Double]) {
+                    fixedMode
+                        ? replay(times, sig, gap: gap, fixed: setting)
+                        : replay(times, sig, gap: gap, tmin: tmins[detector]!, frac: setting)
                 }
-            } else {
-                best = (profile, pick.exact, pick.width)
+                let counts = grid.map { run($0, 0.4).times.count }
+                for (c, w) in runs(counts) {
+                    stable[c] = max(stable[c] ?? 0, Double(w) / Double(grid.count))
+                }
+                guard let first = plateau(counts, target: targetReps) else { continue }
+                let firstTimes = run(grid[first.centre], 0.4).times
+                let firstPeriod = firstTimes.count > 1 ? median(zip(firstTimes, firstTimes.dropFirst()).map { $1 - $0 }) : 2.0
+                let gap = min(1.2, max(0.4, 0.25 * firstPeriod))
+                guard let pick = plateau(grid.map { run($0, gap).times.count }, target: targetReps) else { continue }
+                let setting = grid[pick.centre]
+                let result = run(setting, gap)
+                let period = result.times.count > 1 ? median(zip(result.times, result.times.dropFirst()).map { $1 - $0 }) : 2.0
+                let profile = ExerciseProfile(detector: detector,
+                                              threshold: fixedMode ? setting : 0,
+                                              frac: fixedMode ? nil : setting,
+                                              amplitude: median(result.swings),
+                                              period: period,
+                                              minGap: gap,
+                                              template: template(sig, times, repTimes: result.times, period: period),
+                                              repsTaught: targetReps,
+                                              quality: pick.width,
+                                              exact: pick.exact,
+                                              learnedAt: Date())
+                let cand = Candidate(profile: profile, fixed: fixedMode, width: pick.width,
+                                     margin: Double(pick.width) / Double(grid.count), exact: pick.exact)
+                if best == nil || cand.beats(best!) { best = cand }
             }
         }
-        return best?.profile
+        if let best { return .learned(best.profile) }
+        let good = stable.filter { $0.key >= 3 }
+        let suggested = good.max { a, b in a.value < b.value || (a.value == b.value && a.key > b.key) }?.key
+        return .failed(suggestedReps: suggested)
+    }
+
+    // Longest run of consecutive sweep steps for each count value.
+    static func runs(_ counts: [Int]) -> [Int: Int] {
+        var out: [Int: Int] = [:]
+        var i = 0
+        while i < counts.count {
+            var j = i
+            while j + 1 < counts.count && counts[j + 1] == counts[i] { j += 1 }
+            out[counts[i]] = max(out[counts[i]] ?? 0, j - i + 1)
+            i = j + 1
+        }
+        return out
     }
 
     static func projectedSignals(_ samples: [MotionSample]) -> [ExerciseProfile.Detector: [Double]] {
@@ -378,8 +449,9 @@ enum ProfileLearner {
         return out
     }
 
-    static func replay(_ times: [Double], _ sig: [Double], threshold: Double, gap: Double) -> (times: [Double], swings: [Double]) {
-        let zz = ZigZag(tmin: 0, frac: 0, fixed: threshold)
+    static func replay(_ times: [Double], _ sig: [Double], gap: Double,
+                       fixed: Double? = nil, tmin: Double = 0, frac: Double = 0) -> (times: [Double], swings: [Double]) {
+        let zz = ZigZag(tmin: tmin, frac: frac, fixed: fixed)
         var last = -1e9
         var repTimes: [Double] = []
         var swings: [Double] = []

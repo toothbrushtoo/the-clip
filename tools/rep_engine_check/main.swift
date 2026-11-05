@@ -10,13 +10,14 @@ struct Ref: Decodable {
     let generic: Int
     let detector: String?
     let threshold: Double?
+    let frac: Double?
     let period: Double?
     let gap: Double?
     let width: Int?
     let selfCount: Int?
 
     enum CodingKeys: String, CodingKey {
-        case file, `true`, generic, detector, threshold, period, gap, width
+        case file, `true`, generic, detector, threshold, frac, period, gap, width
         case selfCount = "self"
     }
 }
@@ -54,6 +55,7 @@ for r in refs {
             line += String(format: " %10@ %6d %6d", p.detector.rawValue, e2.reps, r.selfCount ?? -1)
             if p.detector.rawValue != r.detector { line += "  <-- detector mismatch"; failures += 1 }
             if let rt = r.threshold, abs(p.threshold - rt) > 1e-3 * max(1, rt) { line += String(format: "  <-- threshold %.4f vs %.4f", p.threshold, rt); failures += 1 }
+            if (p.frac == nil) != (r.frac == nil) || abs((p.frac ?? 0) - (r.frac ?? 0)) > 1e-3 { line += "  <-- frac \(String(describing: p.frac)) vs \(String(describing: r.frac))"; failures += 1 }
             if let rg = r.gap, abs(p.minGap - rg) > 2e-3 { line += "  <-- gap mismatch"; failures += 1 }
             if let rw = r.width, p.quality != rw { line += "  <-- width \(p.quality) vs \(rw)"; failures += 1 }
             if e2.reps != r.selfCount { line += "  <-- self count mismatch"; failures += 1 }

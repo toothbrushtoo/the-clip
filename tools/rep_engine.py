@@ -163,7 +163,12 @@ class RepEngine:
         self.min_gap = 0.6
         p = self.profile
         if p is not None:
-            self.zz[p['detector']].fixed_t = p['threshold']
+            zz = self.zz[p['detector']]
+            if p.get('frac') is not None:
+                zz.frac = p['frac']
+                zz.fixed_t = None
+            else:
+                zz.fixed_t = p['threshold']
             self.min_gap = p['min_gap']
         self.proj = {'rotation': 0.0, 'motion': 0.0, 'velocity': 0.0}
 
@@ -237,38 +242,79 @@ GRIDS = {
 }
 
 
+FRACS = [0.15 + 0.05 * i for i in range(14)]   # adaptive-threshold sweep: 0.15 .. 0.80
+TMINS = {'rotation': ROT_TMIN, 'motion': ACC_TMIN, 'velocity': VEL_TMIN}
+
+
 def learn(samples, target_reps):
     """samples: list of (t, a(3), g(3)) from one teaching set with a known rep
-    count. Returns a profile dict or None.
+    count. Returns a profile dict, or a diagnosis dict {'failed': True, 'suggested': n}.
 
-    Runs the engine once to get each detector's projected signal, sweeps a fixed
-    threshold over it, and keeps the detector and threshold that reproduce the
-    known count with the widest margin. The template is the average rep shape."""
+    Runs the engine once to get each detector's projected signal, then sweeps
+    both a fixed threshold and an adaptive fraction over it, and keeps the
+    detector and setting that reproduce the known count with the widest margin
+    (margins are compared as a fraction of each sweep's length). The template
+    is the average rep shape."""
     signals = _signals(samples)
     best = None
+    stable = {}   # count -> widest normalised run seen for it, for the diagnosis
     for detector in DETECTORS:
         times_all, sig = signals[detector]
-        grid = GRIDS[detector]
-        pick = _plateau([len(_replay(times_all, sig, t, 0.4)[0]) for t in grid], target_reps)
-        if pick is None:
-            continue
-        times, _ = _replay(times_all, sig, grid[pick[0]], 0.4)
-        period = _median([b - a for a, b in zip(times, times[1:])]) if len(times) > 1 else 2.0
-        gap = min(1.2, max(0.4, 0.25 * period))
-        pick = _plateau([len(_replay(times_all, sig, t, gap)[0]) for t in grid], target_reps)
-        if pick is None:
-            continue
-        centre, width, exact = pick
-        threshold = grid[centre]
-        times, swings = _replay(times_all, sig, threshold, gap)
-        period = _median([b - a for a, b in zip(times, times[1:])]) if len(times) > 1 else 2.0
-        cand = {'detector': detector, 'threshold': threshold, 'amplitude': _median(swings),
-                'period': period, 'min_gap': gap, 'width': width, 'exact': exact,
-                'reps_found': len(times), 'template': _template(sig, times_all, times, period),
-                'reps_taught': target_reps}
-        if best is None or (cand['exact'], cand['width']) > (best['exact'], best['width']):
-            best = cand
-    return best
+        for mode in ('fixed', 'adaptive'):
+            grid = GRIDS[detector] if mode == 'fixed' else FRACS
+            def replay(setting, gap):
+                if mode == 'fixed':
+                    return _replay(times_all, sig, gap, fixed=setting)
+                return _replay(times_all, sig, gap, tmin=TMINS[detector], frac=setting)
+            counts = [len(replay(x, 0.4)[0]) for x in grid]
+            for c, w in _runs(counts).items():
+                stable[c] = max(stable.get(c, 0.0), w / len(grid))
+            pick = _plateau(counts, target_reps)
+            if pick is None:
+                continue
+            times, _ = replay(grid[pick[0]], 0.4)
+            period = _median([b - a for a, b in zip(times, times[1:])]) if len(times) > 1 else 2.0
+            gap = min(1.2, max(0.4, 0.25 * period))
+            pick = _plateau([len(replay(x, gap)[0]) for x in grid], target_reps)
+            if pick is None:
+                continue
+            centre, width, exact = pick
+            setting = grid[centre]
+            times, swings = replay(setting, gap)
+            period = _median([b - a for a, b in zip(times, times[1:])]) if len(times) > 1 else 2.0
+            cand = {'detector': detector,
+                    'threshold': setting if mode == 'fixed' else 0.0,
+                    'frac': setting if mode == 'adaptive' else None,
+                    'amplitude': _median(swings), 'period': period, 'min_gap': gap,
+                    'width': width, 'margin': width / len(grid), 'exact': exact,
+                    'reps_found': len(times), 'template': _template(sig, times_all, times, period),
+                    'reps_taught': target_reps}
+            if best is None or _rank(cand) > _rank(best):
+                best = cand
+    if best is not None:
+        return best
+    good = {c: w for c, w in stable.items() if c >= 3}
+    suggested = max(good, key=lambda c: good[c]) if good else None
+    return {'failed': True, 'suggested': suggested}
+
+
+def _rank(c):
+    # A fixed threshold generalises across tempo better than an adaptive one, so it wins
+    # whenever it reproduced the count exactly with some margin; adaptive is the fallback.
+    return (c['exact'], c['frac'] is None and c['width'] >= 2, c['margin'])
+
+
+def _runs(counts):
+    """Longest run of consecutive sweep steps for each count value."""
+    out = {}
+    i = 0
+    while i < len(counts):
+        j = i
+        while j + 1 < len(counts) and counts[j + 1] == counts[i]:
+            j += 1
+        out[counts[i]] = max(out.get(counts[i], 0), j - i + 1)
+        i = j + 1
+    return out
 
 
 def _signals(samples):
@@ -282,8 +328,8 @@ def _signals(samples):
     return out
 
 
-def _replay(times, sig, threshold, gap):
-    zz = ZigZag(0.0, 0.0, fixed_t=threshold)
+def _replay(times, sig, gap, fixed=None, tmin=0.0, frac=0.0):
+    zz = ZigZag(tmin, frac, fixed_t=fixed)
     last = -1e9
     rep_times, swings = [], []
     for t, x in zip(times, sig):

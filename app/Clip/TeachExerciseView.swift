@@ -27,6 +27,8 @@ struct TeachExerciseView: View {
     @State private var flashTask: Task<Void, Never>?
     @State private var shakes: CGFloat = 0
     @State private var reachedTarget = false
+    @State private var suggestedReps: Int?
+    @State private var recordingURL: URL?
     @FocusState private var nameFocused: Bool
 
     var body: some View {
@@ -308,21 +310,45 @@ struct TeachExerciseView: View {
             }
 
             PillButton(title: "Save") { save() }
+            if let url = recordingURL {
+                ShareLink(item: url) { Text("Share recording") }
+                    .font(.system(.footnote, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
     private var failedPhase: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 14) {
             XiaoBoard(led: .off)
                 .frame(width: 150, height: 128)
-                .padding(.vertical, 14)
-            Text("Couldn't learn that one")
+                .padding(.vertical, 10)
+            Text("Couldn't match \(actualReps) reps")
                 .font(.system(.headline, design: .rounded, weight: .semibold))
-            Text("No setting counted \(actualReps) reps cleanly. Do bigger, steadier reps with a short pause between them, and keep the clip fixed to the weight.")
-                .font(.system(.subheadline, design: .rounded))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            PillButton(title: "Try again") { phase = .ready }
+            if let n = suggestedReps {
+                Text("You said \(actualReps), but the motion looks most like \(n) reps. If \(n) is right, learn it as \(n). Otherwise try again with bigger, steadier reps and the clip fixed to the weight.")
+                    .font(.system(.subheadline, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                PillButton(title: "Learn as \(n) reps") {
+                    actualReps = n
+                    learn()
+                }
+            } else {
+                Text("No setting counted \(actualReps) reps cleanly. Do bigger, steadier reps with a short pause between them, and keep the clip fixed to the weight.")
+                    .font(.system(.subheadline, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            HStack(spacing: 24) {
+                Button("Try again") { phase = .ready }
+                if let url = recordingURL {
+                    ShareLink(item: url) { Text("Share recording") }
+                }
+            }
+            .font(.system(.subheadline, design: .rounded, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.top, 4)
         }
     }
 
@@ -338,7 +364,22 @@ struct TeachExerciseView: View {
     private func stopRecording() {
         samples = session.finishTeaching()
         actualReps = Self.targetReps
+        recordingURL = writeRecording(samples)
         phase = .confirm
+    }
+
+    // The teaching set as a CSV (t, ax, ay, az, gx, gy, gz), so a set that counted wrong can be
+    // replayed and debugged with tools/rep_engine.py.
+    private func writeRecording(_ samples: [MotionSample]) -> URL? {
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let safe = name.trimmingCharacters(in: .whitespaces).lowercased().replacingOccurrences(of: " ", with: "_")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("teach_\(safe)_\(stamp).csv")
+        var text = "t,ax,ay,az,gx,gy,gz\n"
+        text.reserveCapacity(samples.count * 48)
+        for s in samples {
+            text += String(format: "%.3f,%.3f,%.3f,%.3f,%.2f,%.2f,%.2f\n", s.t, s.ax, s.ay, s.az, s.gx, s.gy, s.gz)
+        }
+        return (try? text.write(to: url, atomically: true, encoding: .utf8)) == nil ? nil : url
     }
 
     private func learn() {
@@ -346,13 +387,15 @@ struct TeachExerciseView: View {
         let data = samples
         let target = actualReps
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = ProfileLearner.learn(samples: data, targetReps: target)
+            let outcome = ProfileLearner.learnOutcome(samples: data, targetReps: target)
             DispatchQueue.main.async {
-                if let result {
+                switch outcome {
+                case .learned(let result):
                     profile = result
                     phase = .done
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
-                } else {
+                case .failed(let suggestion):
+                    suggestedReps = (suggestion != nil && suggestion != target) ? suggestion : nil
                     phase = .failed
                     UINotificationFeedbackGenerator().notificationOccurred(.error)
                     if !reduceMotion {
