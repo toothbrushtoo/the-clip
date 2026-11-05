@@ -20,7 +20,6 @@ final class FindClipModel: ObservableObject {
     @Published var smoothedRssi: Double?
     @Published var distance: Double?
     @Published var flashing = false
-    @Published var pulsePhase: Double = 0
     @Published var samplesPerSecond = 0
     @Published var calibrating = false
     @Published var rssiAt1m: Double = UserDefaults.standard.object(forKey: "rssiAt1m") as? Double ?? -55
@@ -32,10 +31,9 @@ final class FindClipModel: ObservableObject {
     private var phoneSamples: [(time: Date, rssi: Double)] = []
     private var clipSamples: [(time: Date, rssi: Double)] = []
     private var calibrationPool: [Double] = []
-    private var frameTimer: Timer?
+    private var staleTimer: Timer?
     private var hapticTimer: Timer?
     private var flashTimer: Timer?
-    private var lastFrame = Date()
     private var lastSample: Date?
     private var startedConnection = false
     private var wasHere = false
@@ -70,14 +68,13 @@ final class FindClipModel: ObservableObject {
             }
             .store(in: &bag)
 
-        lastFrame = Date()
-        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.frame() }
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in self?.checkStale() }
         RunLoop.main.add(timer, forMode: .common)
-        frameTimer = timer
+        staleTimer = timer
     }
 
     func stop() {
-        frameTimer?.invalidate(); frameTimer = nil
+        staleTimer?.invalidate(); staleTimer = nil
         hapticTimer?.invalidate(); hapticTimer = nil
         flashTimer?.invalidate(); flashTimer = nil
         bag.removeAll()
@@ -170,14 +167,8 @@ final class FindClipModel: ObservableObject {
         }
     }
 
-    // 30 Hz: drives the pulse rings and notices when the signal has gone quiet.
-    private func frame() {
-        let now = Date()
-        let dt = min(0.1, now.timeIntervalSince(lastFrame))
-        lastFrame = now
-        let period = 2.2 - 1.7 * proximity
-        pulsePhase += dt / period
-        if band != .searching, let last = lastSample, now.timeIntervalSince(last) > 3 {
+    private func checkStale() {
+        if band != .searching, let last = lastSample, Date().timeIntervalSince(last) > 3 {
             setSearching()
         }
     }
@@ -222,7 +213,7 @@ final class FindClipModel: ObservableObject {
     var title: String {
         switch band {
         case .searching: return "Searching"
-        case .weak: return "Weak Signal"
+        case .weak: return "Weak signal"
         case .far: return "Far"
         case .near: return "Near"
         case .here: return "Here"
@@ -240,14 +231,14 @@ final class FindClipModel: ObservableObject {
 
     var distanceText: String {
         guard let d = distance else { return "" }
-        if d < 0.5 { return "Less than half a metre away" }
+        if d < 0.5 { return "Less than half a metre" }
         if d < 3 {
             let rounded = (d * 2).rounded() / 2
             let text = rounded == rounded.rounded() ? String(format: "%.0f", rounded) : String(format: "%.1f", rounded)
-            return "About \(text) m away"
+            return "About \(text) m"
         }
-        if d < 10 { return "About \(Int(d.rounded())) m away" }
-        return "More than 10 m away"
+        if d < 10 { return "About \(Int(d.rounded())) m" }
+        return "More than 10 m"
     }
 
     var detail: String {
@@ -255,14 +246,33 @@ final class FindClipModel: ObservableObject {
         return String(format: "%.0f dBm · %d samples/s", s, samplesPerSecond)
     }
 
+    // The ring's colour: red when far, through yellow, to blue when close, and green once you're there.
     var color: Color {
         switch band {
         case .searching: return .gray
-        case .weak: return .indigo
-        case .far: return .blue
-        case .near: return .mint
         case .here: return .green
+        default: return Self.ramp(proximity)
         }
+    }
+
+    private static let rampStops: [(at: Double, r: Double, g: Double, b: Double)] = [
+        (0.0, 1.00, 0.23, 0.19),
+        (0.4, 1.00, 0.80, 0.00),
+        (0.75, 0.00, 0.48, 1.00)
+    ]
+
+    static func ramp(_ p: Double) -> Color {
+        let stops = rampStops
+        let x = min(max(p, stops.first!.at), stops.last!.at)
+        for i in 1..<stops.count where x <= stops[i].at {
+            let a = stops[i - 1], b = stops[i]
+            let t = (x - a.at) / (b.at - a.at)
+            return Color(red: a.r + (b.r - a.r) * t,
+                         green: a.g + (b.g - a.g) * t,
+                         blue: a.b + (b.b - a.b) * t)
+        }
+        let last = stops.last!
+        return Color(red: last.r, green: last.g, blue: last.b)
     }
 
     private static func mean(_ xs: [Double]) -> Double {
@@ -287,40 +297,65 @@ struct FindClipView: View {
 
     var body: some View {
         ZStack {
-            background
+            Color(uiColor: .systemBackground)
+                .ignoresSafeArea()
+
             VStack(spacing: 0) {
-                header
-                Spacer(minLength: 12)
-                ProximityMeter(proximity: model.proximity,
-                               phase: model.pulsePhase,
-                               color: model.color,
-                               active: model.band != .searching,
-                               found: model.band == .here,
-                               reduceMotion: reduceMotion)
-                    .frame(width: 300, height: 300)
-                VStack(spacing: 8) {
-                    Text(model.title)
-                        .font(.system(size: 44, weight: .bold, design: .rounded))
-                        .minimumScaleFactor(0.6)
-                        .lineLimit(1)
-                        .contentTransition(.opacity)
-                    Text(model.subtitle)
-                        .font(.system(.title3, design: .rounded))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    Text(model.detail)
-                        .font(.system(.footnote, design: .monospaced))
-                        .foregroundStyle(.tertiary)
+                HStack {
+                    Spacer()
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 30))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close")
                 }
-                .padding(.top, 28)
-                .animation(.easeInOut(duration: 0.3), value: model.band)
-                Spacer(minLength: 12)
-                buttons
+
+                Spacer()
+
+                ZStack {
+                    FindRing(proximity: model.proximity,
+                             color: model.color,
+                             searching: model.band == .searching,
+                             reduceMotion: reduceMotion)
+                        .frame(width: 280, height: 280)
+
+                    VStack(spacing: 6) {
+                        Text(model.title)
+                            .font(.system(size: 40, weight: .bold, design: .rounded))
+                            .minimumScaleFactor(0.6)
+                            .lineLimit(1)
+                        Text(model.subtitle)
+                            .font(.system(.subheadline, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, 48)
+                    .animation(.easeInOut(duration: 0.3), value: model.band)
+                }
+
+                Text(model.detail)
+                    .font(.system(.footnote, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 28)
+
+                Spacer()
+
+                HStack(spacing: 32) {
+                    Button(model.flashing ? "Stop flashing" : "Flash clip") { model.toggleFlash() }
+                        .disabled(ble.state != .connected)
+                    Button("Calibrate") { showingCalibrate = true }
+                }
+                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                .foregroundStyle(.secondary)
+                .padding(.bottom, 8)
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 12)
+            .padding(24)
         }
-        .preferredColorScheme(.dark)
         .onAppear { model.start() }
         .onDisappear { model.stop() }
         .sheet(isPresented: $showingCalibrate) {
@@ -328,118 +363,42 @@ struct FindClipView: View {
                 .presentationDetents([.medium])
         }
     }
-
-    private var background: some View {
-        ZStack {
-            Color.black
-            RadialGradient(colors: [model.color.opacity(0.35), .clear],
-                           center: .center, startRadius: 40, endRadius: 420)
-                .animation(.easeInOut(duration: 0.8), value: model.band)
-        }
-        .ignoresSafeArea()
-    }
-
-    private var header: some View {
-        HStack {
-            Text("Find Clip")
-                .font(.system(.title2, design: .rounded, weight: .bold))
-            Spacer()
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 30))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Close")
-        }
-        .padding(.top, 8)
-    }
-
-    private var buttons: some View {
-        VStack(spacing: 14) {
-            Button {
-                model.toggleFlash()
-            } label: {
-                Label(model.flashing ? "Stop Flashing" : "Flash Clip",
-                      systemImage: model.flashing ? "lightbulb.slash.fill" : "lightbulb.fill")
-                    .font(.system(.headline, design: .rounded, weight: .semibold))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 54)
-            }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.capsule)
-            .tint(model.flashing ? .orange : .white)
-            .foregroundStyle(model.flashing ? .white : .black)
-            .disabled(ble.state != .connected)
-            .animation(.easeInOut(duration: 0.2), value: model.flashing)
-
-            Button("Calibrate distance") { showingCalibrate = true }
-                .font(.system(.subheadline, design: .rounded, weight: .medium))
-                .foregroundStyle(.secondary)
-        }
-    }
 }
 
-struct ProximityMeter: View {
+// One ring. It fills as you get closer; while searching a short grey segment slowly goes round.
+struct FindRing: View {
     let proximity: Double
-    let phase: Double
     let color: Color
-    let active: Bool
-    let found: Bool
+    let searching: Bool
     let reduceMotion: Bool
+
+    @State private var spin = false
 
     var body: some View {
         ZStack {
-            if !reduceMotion {
-                ring(0)
-                ring(1)
-                ring(2)
+            Circle()
+                .stroke(Color.primary.opacity(0.08), lineWidth: 18)
+
+            if searching {
+                Circle()
+                    .trim(from: 0, to: 0.18)
+                    .stroke(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 18, lineCap: .round))
+                    .rotationEffect(.degrees(spin ? 360 : 0))
+                    .animation(reduceMotion ? nil : .linear(duration: 2.4).repeatForever(autoreverses: false), value: spin)
+                    .onAppear { spin = true }
+                    .onDisappear { spin = false }
+                    .transition(.opacity)
+            } else {
+                Circle()
+                    .trim(from: 0, to: max(0.01, proximity))
+                    .stroke(color, style: StrokeStyle(lineWidth: 18, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .animation(.spring(response: 0.7, dampingFraction: 0.9), value: proximity)
+                    .animation(.easeInOut(duration: 0.4), value: color)
+                    .transition(.opacity)
             }
-
-            Circle()
-                .fill(color.opacity(0.18))
-                .frame(width: 150 + 110 * proximity, height: 150 + 110 * proximity)
-                .blur(radius: 22)
-                .animation(.easeInOut(duration: 0.5), value: proximity)
-
-            Circle()
-                .stroke(Color.white.opacity(0.08), lineWidth: 16)
-                .padding(8)
-
-            Circle()
-                .trim(from: 0, to: max(0.015, proximity))
-                .stroke(color, style: StrokeStyle(lineWidth: 16, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .padding(8)
-                .shadow(color: color.opacity(0.6), radius: 10)
-                .animation(.spring(response: 0.6, dampingFraction: 0.9), value: proximity)
-
-            Circle()
-                .fill(color)
-                .frame(width: found ? 96 : 14 + 22 * proximity, height: found ? 96 : 14 + 22 * proximity)
-                .shadow(color: color.opacity(0.9), radius: found ? 24 : 10)
-                .overlay {
-                    if found {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 44, weight: .bold))
-                            .foregroundStyle(.white)
-                            .transition(.scale.combined(with: .opacity))
-                    }
-                }
-                .animation(.spring(response: 0.45, dampingFraction: 0.65), value: found)
-                .animation(.easeInOut(duration: 0.5), value: proximity)
         }
-    }
-
-    private func ring(_ i: Int) -> some View {
-        let q = (phase + Double(i) / 3).truncatingRemainder(dividingBy: 1)
-        let strength = active ? 0.55 : 0.18
-        return Circle()
-            .stroke(color.opacity((1 - q) * strength), lineWidth: 2)
-            .scaleEffect(0.5 + 0.8 * q)
+        .animation(.easeInOut(duration: 0.4), value: searching)
     }
 }
 

@@ -276,7 +276,6 @@ extension ClipBLE: CBPeripheralDelegate {
 
 struct ClipStatusView: View {
     @ObservedObject var ble = ClipBLE.shared
-    @State private var showingFind = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -289,17 +288,10 @@ struct ClipStatusView: View {
                 Text("\(r) dBm").monospacedDigit().foregroundStyle(.secondary)
             }
             Spacer()
-            Button {
-                showingFind = true
-            } label: {
-                Label("Find", systemImage: "location.magnifyingglass")
-            }
-            .buttonStyle(.bordered)
         }
         .font(.subheadline)
         .padding(10)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
-        .fullScreenCover(isPresented: $showingFind) { FindClipView() }
     }
 
     private var color: Color {
