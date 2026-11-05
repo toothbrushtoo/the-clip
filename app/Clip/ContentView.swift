@@ -14,6 +14,6 @@ struct ContentView: View {
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }
-        .overlay { ClipConnectOverlay() }
+        .overlay { ConnectionSheetHost() }
     }
 }

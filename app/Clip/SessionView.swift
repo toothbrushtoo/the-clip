@@ -45,7 +45,10 @@ struct SessionView: View {
             }
 
             if !session.connected {
-                Button("Connect") { session.connectFake() }
+                Button("Connect") {
+                    if session.source == .clip { ConnectionSheet.shared.present() }
+                    session.connect()
+                }
                     .buttonStyle(.borderedProminent)
             } else if session.inSet {
                 Button("End set") { endQuickSet() }
