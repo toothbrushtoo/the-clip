@@ -299,9 +299,13 @@ def learn(samples, target_reps):
 
 
 def _rank(c):
-    # A fixed threshold generalises across tempo better than an adaptive one, so it wins
-    # whenever it reproduced the count exactly with some margin; adaptive is the fallback.
-    return (c['exact'], c['frac'] is None and c['width'] >= 2, c['margin'])
+    # Rotation is the cleanest signal there is (it ignores gravity, grip and mounting), so when
+    # it reproduces the count exactly with a decent margin it wins. Otherwise a fixed threshold
+    # beats an adaptive one, because it generalises across tempo; adaptive is the fallback.
+    return (c['exact'],
+            c['exact'] and c['detector'] == 'rotation' and c['margin'] >= 0.3,
+            c['frac'] is None and c['width'] >= 2,
+            c['margin'])
 
 
 def _runs(counts):

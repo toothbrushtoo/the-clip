@@ -354,15 +354,22 @@ enum ProfileLearner {
         var margin: Double
         var exact: Bool
 
-        // A fixed threshold generalises across tempo better than an adaptive one, so it wins
-        // whenever it reproduced the count exactly with some margin; adaptive is the fallback.
-        var rank: (Int, Int, Double) { (exact ? 1 : 0, (fixed && width >= 2) ? 1 : 0, margin) }
+        // Rotation is the cleanest signal there is (it ignores gravity, grip and mounting), so when
+        // it reproduces the count exactly with a decent margin it wins. Otherwise a fixed threshold
+        // beats an adaptive one, because it generalises across tempo; adaptive is the fallback.
+        var rank: (Int, Int, Int, Double) {
+            (exact ? 1 : 0,
+             (exact && profile.detector == .rotation && margin >= 0.3) ? 1 : 0,
+             (fixed && width >= 2) ? 1 : 0,
+             margin)
+        }
 
         func beats(_ other: Candidate) -> Bool {
             let a = rank, b = other.rank
             if a.0 != b.0 { return a.0 > b.0 }
             if a.1 != b.1 { return a.1 > b.1 }
-            return a.2 > b.2
+            if a.2 != b.2 { return a.2 > b.2 }
+            return a.3 > b.3
         }
     }
 

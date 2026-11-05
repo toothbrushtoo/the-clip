@@ -21,6 +21,7 @@ struct WorkoutRunView: View {
     @State private var teaching = false
     @State private var banner: String?
     @State private var setsDone: [Int] = []   // reps logged per completed set of the current exercise
+    @State private var exportURL: URL?
 
     @AppStorage("restSeconds") private var restLength = 90
     @AppStorage("weightStep") private var weightStep = 2.5
@@ -154,6 +155,14 @@ struct WorkoutRunView: View {
                 }
             }
 
+            if !session.inSet, let url = exportURL {
+                ShareLink(item: url) {
+                    Label("Share last set", systemImage: "square.and.arrow.up")
+                        .font(.footnote)
+                }
+                .foregroundStyle(.secondary)
+            }
+
             Spacer()
             controls
         }
@@ -241,6 +250,7 @@ struct WorkoutRunView: View {
     private func completeSet() {
         guard session.inSet else { return }
         session.endSet()
+        exportURL = session.exportLastSet(name: exerciseName)
         let reps = session.reps
         if reps > 0, let s = session.sets.first {
             history.log(LoggedSet(exercise: exerciseName, reps: s.reps, weightKg: weight,

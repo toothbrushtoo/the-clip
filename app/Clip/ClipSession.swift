@@ -41,6 +41,11 @@ final class ClipSession: ObservableObject {
     private var repTimes: [Date] = []
     private var recording: [MotionSample]?
 
+    // Samples of the current or last set, kept so a set that counted wrong can be exported.
+    private(set) var lastSetSamples: [MotionSample] = []
+    private(set) var lastSetSources: [(t: Double, source: ExerciseProfile.Detector)] = []
+    private let maxKept = 18000   // 3 minutes at 100 Hz
+
     var isTeaching: Bool { recording != nil }
 
     func connect() {
@@ -79,6 +84,8 @@ final class ClipSession: ObservableObject {
         let engine = RepEngine(profile: profile)
         self.engine = engine
         detector = engine.chosen
+        lastSetSamples.removeAll(keepingCapacity: true)
+        lastSetSources.removeAll()
 
         switch source {
         case .fake:
@@ -141,6 +148,23 @@ final class ClipSession: ObservableObject {
 
     func clearHistory() { sets.removeAll() }
 
+    // The last set as CSV (t, ax, ay, az, gx, gy, gz, rep) where rep names the detector that
+    // counted at that sample. For debugging with tools/rep_engine.py.
+    func exportLastSet(name: String) -> URL? {
+        guard !lastSetSamples.isEmpty else { return nil }
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let safe = name.trimmingCharacters(in: .whitespaces).lowercased().replacingOccurrences(of: " ", with: "_")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("set_\(safe)_\(stamp).csv")
+        var text = "t,ax,ay,az,gx,gy,gz,rep\n"
+        text.reserveCapacity(lastSetSamples.count * 50)
+        var marks = Dictionary(uniqueKeysWithValues: lastSetSources.map { ($0.t, $0.source.rawValue) })
+        for s in lastSetSamples {
+            let mark = marks.removeValue(forKey: s.t) ?? ""
+            text += String(format: "%.3f,%.3f,%.3f,%.3f,%.2f,%.2f,%.2f,", s.t, s.ax, s.ay, s.az, s.gx, s.gy, s.gz) + mark + "\n"
+        }
+        return (try? text.write(to: url, atomically: true, encoding: .utf8)) == nil ? nil : url
+    }
+
     private func useOnboardCount() {
         ble.streaming = false
         ble.onSample = nil
@@ -154,8 +178,10 @@ final class ClipSession: ObservableObject {
     private func feed(_ sample: MotionSample) {
         guard inSet, let engine else { return }
         recording?.append(sample)
+        if lastSetSamples.count < maxKept { lastSetSamples.append(sample) }
         if let d = engine.push(sample) {
             detector = d
+            lastSetSources.append((sample.t, d))
             reps = engine.reps
             if source == .clip { ble.flashRep() }
         }
