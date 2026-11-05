@@ -8,11 +8,13 @@ const uint8_t UUID_SERVICE[16] = {0x10, 0x4A, 0x0D, 0x1C, 0x8E, 0x2B, 0x3F, 0x9A
 const uint8_t UUID_REP[16]     = {0x10, 0x4A, 0x0D, 0x1C, 0x8E, 0x2B, 0x3F, 0x9A, 0x2C, 0x4D, 0x6B, 0x5E, 0x02, 0x00, 0x1A, 0x7C};
 const uint8_t UUID_CMD[16]     = {0x10, 0x4A, 0x0D, 0x1C, 0x8E, 0x2B, 0x3F, 0x9A, 0x2C, 0x4D, 0x6B, 0x5E, 0x03, 0x00, 0x1A, 0x7C};
 const uint8_t UUID_BATT[16]    = {0x10, 0x4A, 0x0D, 0x1C, 0x8E, 0x2B, 0x3F, 0x9A, 0x2C, 0x4D, 0x6B, 0x5E, 0x04, 0x00, 0x1A, 0x7C};
+const uint8_t UUID_RSSI[16]    = {0x10, 0x4A, 0x0D, 0x1C, 0x8E, 0x2B, 0x3F, 0x9A, 0x2C, 0x4D, 0x6B, 0x5E, 0x05, 0x00, 0x1A, 0x7C};
 
 BLEService        clipService(UUID_SERVICE);
 BLECharacteristic repChar(UUID_REP);
 BLECharacteristic cmdChar(UUID_CMD);
 BLECharacteristic battChar(UUID_BATT);
+BLECharacteristic rssiChar(UUID_RSSI);   // signal strength of the phone, as seen from the clip (int8 dBm)
 
 const int   WINDOW = 600;
 const float FAST = 0.08f;
@@ -20,6 +22,9 @@ const float SLOW = 0.0017f;
 const float MIN_AMP = 2.5f;
 const float FRAC = 0.3f;
 const unsigned long MIN_GAP_MS = 500;
+
+const unsigned long FIND_TIMEOUT_MS = 60000;
+const unsigned long RSSI_PERIOD_MS = 200;
 
 float band[WINDOW][3];
 int bandHead = 0, bandCount = 0;
@@ -34,9 +39,13 @@ unsigned long samples = 0;
 
 unsigned long lastSampleMs = 0;
 unsigned long lastBatteryMs = 0;
+unsigned long lastRssiMs = 0;
 unsigned long greenUntil = 0;
-int findBlinks = 0;
+int blueBlinks = 0;
 unsigned long nextBlinkMs = 0;
+bool finding = false;
+unsigned long findUntilMs = 0;
+uint16_t connHandle = BLE_CONN_HANDLE_INVALID;
 
 void led(int pin, bool on) {
   digitalWrite(pin, on ? LOW : HIGH);
@@ -131,28 +140,49 @@ uint8_t readBatteryPercent() {
   return (uint8_t)constrain(pct, 0.0f, 100.0f);
 }
 
+// Find mode: all three LEDs strobe white until the phone says stop, or for a minute.
+// Separately, whenever the app subscribes to rssiChar, the clip reports how strongly it
+// hears the phone five times a second, so the app can average both ends of the link.
+void startFind() {
+  finding = true;
+  findUntilMs = millis() + FIND_TIMEOUT_MS;
+  Serial.println("find on");
+}
+
+void stopFind() {
+  if (finding) Serial.println("find off");
+  finding = false;
+}
+
 void onCmd(uint16_t conn, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
   if (len < 1) return;
   switch (data[0]) {
     case 0x01: inSet = true; resetReps(); notifyReps(); Serial.println("set start"); break;
     case 0x02: inSet = false; Serial.println("set end"); break;
-    case 0x03: findBlinks = 20; Serial.println("find me"); break;
+    case 0x03: startFind(); break;
+    case 0x04: stopFind(); break;
   }
 }
 
 void onConnect(uint16_t conn) {
   Serial.println("connected");
-  findBlinks = 4;
+  connHandle = conn;
+  blueBlinks = 4;
+  nextBlinkMs = millis() + 150;
+  BLEConnection* c = Bluefruit.Connection(conn);
+  if (c) c->monitorRssi();
 }
 
 void onDisconnect(uint16_t conn, uint8_t reason) {
   Serial.println("disconnected");
+  connHandle = BLE_CONN_HANDLE_INVALID;
   inSet = false;
+  stopFind();
 }
 
 void setupBLE() {
   Bluefruit.begin();
-  Bluefruit.setTxPower(4);
+  Bluefruit.setTxPower(8);
   Bluefruit.setName("Clip");
   Bluefruit.Periph.setConnectCallback(onConnect);
   Bluefruit.Periph.setDisconnectCallback(onDisconnect);
@@ -175,6 +205,12 @@ void setupBLE() {
   battChar.setFixedLen(1);
   battChar.begin();
   battChar.write8(readBatteryPercent());
+
+  rssiChar.setProperties(CHR_PROPS_READ | CHR_PROPS_NOTIFY);
+  rssiChar.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+  rssiChar.setFixedLen(1);
+  rssiChar.begin();
+  rssiChar.write8(0);
 
   Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
   Bluefruit.Advertising.addTxPower();
@@ -226,13 +262,33 @@ void loop() {
     }
   }
 
-  led(LED_GREEN, now < greenUntil);
+  if (finding && now >= findUntilMs) stopFind();
 
-  if (findBlinks > 0 && now >= nextBlinkMs) {
-    led(LED_BLUE, findBlinks % 2 == 0);
-    findBlinks--;
+  // double white flash every 600 ms while finding
+  bool flash = false;
+  if (finding) {
+    unsigned long phase = now % 600;
+    flash = phase < 60 || (phase >= 150 && phase < 210);
+  }
+
+  if (blueBlinks > 0 && now >= nextBlinkMs) {
+    blueBlinks--;
     nextBlinkMs = now + 150;
-    if (findBlinks == 0) led(LED_BLUE, false);
+  }
+  bool blueOn = blueBlinks > 0 && blueBlinks % 2 == 0;
+
+  led(LED_RED, flash);
+  led(LED_GREEN, flash || now < greenUntil);
+  led(LED_BLUE, flash || blueOn);
+
+  if (connHandle != BLE_CONN_HANDLE_INVALID && rssiChar.notifyEnabled() && now - lastRssiMs >= RSSI_PERIOD_MS) {
+    lastRssiMs = now;
+    BLEConnection* c = Bluefruit.Connection(connHandle);
+    if (c && c->connected()) {
+      int8_t r = c->getRssi();
+      rssiChar.write8((uint8_t)r);
+      rssiChar.notify8((uint8_t)r);
+    }
   }
 
   if (now - lastBatteryMs > 30000) {

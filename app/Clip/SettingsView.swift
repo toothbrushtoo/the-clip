@@ -9,6 +9,7 @@ struct SettingsView: View {
     @AppStorage("defaultWeight") private var defaultWeight = 10.0
     @AppStorage("haptics") private var haptics = true
     @State private var confirmClear = false
+    @State private var showingFind = false
 
     private var version: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "-"
@@ -49,8 +50,7 @@ struct SettingsView: View {
                     if let r = ble.rssi {
                         LabeledContent("Signal", value: "\(r) dBm")
                     }
-                    Button("Find my clip") { ble.find() }
-                        .disabled(ble.state != .connected)
+                    Button("Find my clip") { showingFind = true }
                 }
 
                 Section("Data") {
@@ -70,6 +70,7 @@ struct SettingsView: View {
             .confirmationDialog("Delete every logged set?", isPresented: $confirmClear, titleVisibility: .visible) {
                 Button("Delete all history", role: .destructive) { history.clear() }
             }
+            .fullScreenCover(isPresented: $showingFind) { FindClipView() }
         }
     }
 }

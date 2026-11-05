@@ -10,6 +10,7 @@ final class ClipBLE: NSObject, ObservableObject {
     static let repUUID     = CBUUID(string: "7C1A0002-5E6B-4D2C-9A3F-2B8E1C0D4A10")
     static let cmdUUID     = CBUUID(string: "7C1A0003-5E6B-4D2C-9A3F-2B8E1C0D4A10")
     static let battUUID    = CBUUID(string: "7C1A0004-5E6B-4D2C-9A3F-2B8E1C0D4A10")
+    static let rssiUUID    = CBUUID(string: "7C1A0005-5E6B-4D2C-9A3F-2B8E1C0D4A10")
 
     enum State: String { case off, idle, scanning, found, connecting, connected, failed }
 
@@ -23,7 +24,19 @@ final class ClipBLE: NSObject, ObservableObject {
     @Published var tempoMs = 0
     @Published var battery: Int?
     @Published var rssi: Int?
+    @Published var clipRssi: Int?
     @Published var failure: Failure?
+
+    // The Find screen turns this on: the phone then reads signal strength five times a second
+    // and asks the clip to report its own reading of the phone, instead of once a second.
+    var finding = false {
+        didSet {
+            guard finding != oldValue else { return }
+            if state == .connected { startRssiTimer() }
+            if let clip, let rssiChr { clip.setNotifyValue(finding, for: rssiChr) }
+            if !finding { clipRssi = nil }
+        }
+    }
 
     // The connection sheet turns this on while it is showing. Then a found clip waits at `.found`
     // until `connectFound()` is called, and searching or connecting for too long ends in `.failed`.
@@ -33,6 +46,7 @@ final class ClipBLE: NSObject, ObservableObject {
     private var central: CBCentralManager!
     private var clip: CBPeripheral?
     private var cmd: CBCharacteristic?
+    private var rssiChr: CBCharacteristic?
     private var wantsConnection = false
     private var rssiTimer: Timer?
     private var scanTimer: Timer?
@@ -84,6 +98,7 @@ final class ClipBLE: NSObject, ObservableObject {
     func startSet() { reps = 0; send(0x01) }
     func endSet() { send(0x02) }
     func find() { send(0x03) }
+    func stopFind() { send(0x04) }
 
     private func scan() {
         guard central.state == .poweredOn, wantsConnection, clip == nil else { return }
@@ -122,10 +137,15 @@ final class ClipBLE: NSObject, ObservableObject {
         connectTimer?.invalidate()
         connectTimer = nil
         state = .connected
+        startRssiTimer()
+    }
+
+    private func startRssiTimer() {
         rssiTimer?.invalidate()
-        rssiTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        rssiTimer = Timer.scheduledTimer(withTimeInterval: finding ? 0.2 : 1.0, repeats: true) { [weak self] _ in
             self?.clip?.readRSSI()
         }
+        clip?.readRSSI()
     }
 
     private func send(_ byte: UInt8) {
@@ -136,7 +156,9 @@ final class ClipBLE: NSObject, ObservableObject {
     private func reset() {
         clip = nil
         cmd = nil
+        rssiChr = nil
         rssi = nil
+        clipRssi = nil
         rssiTimer?.invalidate(); rssiTimer = nil
         scanTimer?.invalidate(); scanTimer = nil
         connectTimer?.invalidate(); connectTimer = nil
@@ -206,7 +228,7 @@ extension ClipBLE: CBPeripheralDelegate {
             retryOrFail(Failure(title: "Clip didn't respond", hint: "Restart the clip, then try again."))
             return
         }
-        peripheral.discoverCharacteristics([Self.repUUID, Self.cmdUUID, Self.battUUID], for: service)
+        peripheral.discoverCharacteristics([Self.repUUID, Self.cmdUUID, Self.battUUID, Self.rssiUUID], for: service)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
@@ -219,6 +241,9 @@ extension ClipBLE: CBPeripheralDelegate {
             case Self.battUUID:
                 peripheral.readValue(for: c)
                 peripheral.setNotifyValue(true, for: c)
+            case Self.rssiUUID:
+                rssiChr = c
+                if finding { peripheral.setNotifyValue(true, for: c) }
             default:
                 break
             }
@@ -238,6 +263,9 @@ extension ClipBLE: CBPeripheralDelegate {
             tempoMs = Int(b[2]) | Int(b[3]) << 8
         } else if characteristic.uuid == Self.battUUID, let first = b.first {
             battery = Int(first)
+        } else if characteristic.uuid == Self.rssiUUID, let first = b.first {
+            let value = Int(Int8(bitPattern: first))
+            clipRssi = value < 0 ? value : nil
         }
     }
 
@@ -248,6 +276,7 @@ extension ClipBLE: CBPeripheralDelegate {
 
 struct ClipStatusView: View {
     @ObservedObject var ble = ClipBLE.shared
+    @State private var showingFind = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -261,16 +290,16 @@ struct ClipStatusView: View {
             }
             Spacer()
             Button {
-                ble.find()
+                showingFind = true
             } label: {
                 Label("Find", systemImage: "location.magnifyingglass")
             }
             .buttonStyle(.bordered)
-            .disabled(ble.state != .connected)
         }
         .font(.subheadline)
         .padding(10)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+        .fullScreenCover(isPresented: $showingFind) { FindClipView() }
     }
 
     private var color: Color {
