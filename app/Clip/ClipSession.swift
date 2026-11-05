@@ -1,8 +1,18 @@
 import Foundation
 import Combine
 
+// One counting session: picks where the motion comes from (fake timer, the phone's sensors or
+// the clip), runs the RepEngine on it, and keeps the reps, tempo and set history.
 final class ClipSession: ObservableObject {
     enum Source: String, CaseIterable { case fake, phone, clip }
+
+    // What is producing the count for the current set.
+    enum Counter: String {
+        case fake = "Fake"
+        case phone = "Phone"
+        case clipStream = "Clip"
+        case clipOnboard = "Clip (on-board count)"
+    }
 
     @Published var reps = 0 {
         didSet { if reps > oldValue { noteRep() } }
@@ -14,14 +24,24 @@ final class ClipSession: ObservableObject {
         didSet { if oldValue != source { disconnect() } }
     }
     @Published var sets: [WorkoutSet] = []
+    @Published private(set) var counter: Counter?
+    @Published private(set) var detector: ExerciseProfile.Detector?
 
-    let motion = MotionCounter()
+    // The learned profile for the exercise being done. Set it before `startSet()`.
+    var profile: ExerciseProfile?
+
+    let phone = PhoneMotion()
     let ble = ClipBLE.shared
+    private var engine: RepEngine?
     private var timer: Timer?
+    private var streamWatchdog: Timer?
     private var setStart: Date?
     private var bag = Set<AnyCancellable>()
     private var linkBag = Set<AnyCancellable>()
     private var repTimes: [Date] = []
+    private var recording: [MotionSample]?
+
+    var isTeaching: Bool { recording != nil }
 
     func connect() {
         switch source {
@@ -52,36 +72,94 @@ final class ClipSession: ObservableObject {
         inSet = true
         setStart = Date()
         timer?.invalidate()
+        timer = nil
+        streamWatchdog?.invalidate()
+        streamWatchdog = nil
+        bag.removeAll()
+        let engine = RepEngine(profile: profile)
+        self.engine = engine
+        detector = engine.chosen
+
         switch source {
         case .fake:
+            counter = .fake
             timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-                self?.reps += 1
+                guard let self else { return }
+                reps += 1
             }
         case .phone:
-            motion.start()
-            motion.$reps
-                .receive(on: RunLoop.main)
-                .sink { [weak self] r in self?.reps = r }
-                .store(in: &bag)
+            counter = .phone
+            phone.start { [weak self] s in self?.feed(s) }
         case .clip:
             ble.startSet()
-            ble.$reps
-                .receive(on: RunLoop.main)
-                .sink { [weak self] r in self?.reps = r }
-                .store(in: &bag)
+            if ble.streamSupported {
+                counter = .clipStream
+                ble.onSample = { [weak self] s in self?.feed(s) }
+                ble.streaming = true
+                // If the stream never shows up (old firmware, tiny MTU), use the clip's own count.
+                streamWatchdog = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
+                    guard let self, inSet, ble.streamSamples == 0 else { return }
+                    useOnboardCount()
+                }
+            } else {
+                useOnboardCount()
+            }
         }
     }
 
-    func endSet() {
+    func endSet(record: Bool = true) {
         inSet = false
-        timer?.invalidate(); timer = nil
-        motion.stop()
-        if source == .clip { ble.endSet() }
+        timer?.invalidate()
+        timer = nil
+        streamWatchdog?.invalidate()
+        streamWatchdog = nil
+        phone.stop()
+        if source == .clip {
+            ble.streaming = false
+            ble.onSample = nil
+            ble.endSet()
+        }
         bag.removeAll()
-        recordSet()
+        if record { recordSet() }
+    }
+
+    // Teaching: count generically while recording every sample, so the learner can work on them.
+    func startTeaching() {
+        let saved = profile
+        profile = nil
+        recording = []
+        startSet()
+        profile = saved
+    }
+
+    func finishTeaching() -> [MotionSample] {
+        let samples = recording ?? []
+        recording = nil
+        endSet(record: false)
+        return samples
     }
 
     func clearHistory() { sets.removeAll() }
+
+    private func useOnboardCount() {
+        ble.streaming = false
+        ble.onSample = nil
+        counter = .clipOnboard
+        ble.$reps
+            .receive(on: RunLoop.main)
+            .sink { [weak self] r in self?.reps = r }
+            .store(in: &bag)
+    }
+
+    private func feed(_ sample: MotionSample) {
+        guard inSet, let engine else { return }
+        recording?.append(sample)
+        if let d = engine.push(sample) {
+            detector = d
+            reps = engine.reps
+            if source == .clip { ble.flashRep() }
+        }
+    }
 
     private func noteRep() {
         repTimes.append(Date())
@@ -95,5 +173,9 @@ final class ClipSession: ObservableObject {
         setStart = nil
     }
 
-    deinit { timer?.invalidate(); motion.stop() }
+    deinit {
+        timer?.invalidate()
+        streamWatchdog?.invalidate()
+        phone.stop()
+    }
 }

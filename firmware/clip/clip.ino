@@ -9,12 +9,20 @@ const uint8_t UUID_REP[16]     = {0x10, 0x4A, 0x0D, 0x1C, 0x8E, 0x2B, 0x3F, 0x9A
 const uint8_t UUID_CMD[16]     = {0x10, 0x4A, 0x0D, 0x1C, 0x8E, 0x2B, 0x3F, 0x9A, 0x2C, 0x4D, 0x6B, 0x5E, 0x03, 0x00, 0x1A, 0x7C};
 const uint8_t UUID_BATT[16]    = {0x10, 0x4A, 0x0D, 0x1C, 0x8E, 0x2B, 0x3F, 0x9A, 0x2C, 0x4D, 0x6B, 0x5E, 0x04, 0x00, 0x1A, 0x7C};
 const uint8_t UUID_RSSI[16]    = {0x10, 0x4A, 0x0D, 0x1C, 0x8E, 0x2B, 0x3F, 0x9A, 0x2C, 0x4D, 0x6B, 0x5E, 0x05, 0x00, 0x1A, 0x7C};
+const uint8_t UUID_STREAM[16]  = {0x10, 0x4A, 0x0D, 0x1C, 0x8E, 0x2B, 0x3F, 0x9A, 0x2C, 0x4D, 0x6B, 0x5E, 0x06, 0x00, 0x1A, 0x7C};
 
 BLEService        clipService(UUID_SERVICE);
 BLECharacteristic repChar(UUID_REP);
 BLECharacteristic cmdChar(UUID_CMD);
 BLECharacteristic battChar(UUID_BATT);
 BLECharacteristic rssiChar(UUID_RSSI);   // signal strength of the phone, as seen from the clip (int8 dBm)
+BLECharacteristic streamChar(UUID_STREAM); // raw motion, 6 samples per packet, while the app subscribes
+
+// Stream packet: [seq][count] then count x (ax, ay, az in cm/s^2, gx, gy, gz in 0.1 deg/s) as int16 LE.
+const int STREAM_SAMPLES = 6;
+uint8_t streamPkt[2 + STREAM_SAMPLES * 12];
+uint8_t streamCount = 0;
+uint8_t streamSeq = 0;
 
 const int   WINDOW = 600;
 const float FAST = 0.08f;
@@ -46,6 +54,33 @@ unsigned long nextBlinkMs = 0;
 bool finding = false;
 unsigned long findUntilMs = 0;
 uint16_t connHandle = BLE_CONN_HANDLE_INVALID;
+
+// One burst read gets gyro then accel (registers 0x22..0x2D) so both are from the same instant.
+void readIMU(float* a, float* g) {
+  uint8_t raw[12];
+  imu.readRegisterRegion(raw, LSM6DS3_ACC_GYRO_OUTX_L_G, 12);
+  for (int k = 0; k < 3; k++) {
+    int16_t gr = (int16_t)(raw[2 * k] | (raw[2 * k + 1] << 8));
+    int16_t ar = (int16_t)(raw[6 + 2 * k] | (raw[7 + 2 * k] << 8));
+    g[k] = imu.calcGyro(gr);
+    a[k] = imu.calcAccel(ar) * 9.81f;
+  }
+}
+
+void streamSample(const float* a, const float* g) {
+  int16_t* p = (int16_t*)(streamPkt + 2 + streamCount * 12);
+  for (int k = 0; k < 3; k++) {
+    p[k] = (int16_t)constrain(a[k] * 100.0f, -32767.0f, 32767.0f);
+    p[3 + k] = (int16_t)constrain(g[k] * 10.0f, -32767.0f, 32767.0f);
+  }
+  streamCount++;
+  if (streamCount == STREAM_SAMPLES) {
+    streamPkt[0] = streamSeq++;
+    streamPkt[1] = streamCount;
+    streamChar.notify(streamPkt, 2 + streamCount * 12);
+    streamCount = 0;
+  }
+}
 
 void led(int pin, bool on) {
   digitalWrite(pin, on ? LOW : HIGH);
@@ -161,6 +196,7 @@ void onCmd(uint16_t conn, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
     case 0x02: inSet = false; Serial.println("set end"); break;
     case 0x03: startFind(); break;
     case 0x04: stopFind(); break;
+    case 0x07: greenUntil = millis() + 80; break;   // the app counted a rep: flash green
   }
 }
 
@@ -181,6 +217,7 @@ void onDisconnect(uint16_t conn, uint8_t reason) {
 }
 
 void setupBLE() {
+  Bluefruit.configPrphBandwidth(BANDWIDTH_MAX);
   Bluefruit.begin();
   Bluefruit.setTxPower(8);
   Bluefruit.setName("Clip");
@@ -212,6 +249,11 @@ void setupBLE() {
   rssiChar.begin();
   rssiChar.write8(0);
 
+  streamChar.setProperties(CHR_PROPS_NOTIFY);
+  streamChar.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+  streamChar.setMaxLen(sizeof(streamPkt));
+  streamChar.begin();
+
   Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
   Bluefruit.Advertising.addTxPower();
   Bluefruit.Advertising.addService(clipService);
@@ -236,6 +278,8 @@ void setup() {
   digitalWrite(VBAT_ENABLE, LOW);
   analogReadResolution(12);
 
+  imu.settings.accelRange = 4;
+  imu.settings.gyroRange = 1000;
   if (imu.begin() != 0) {
     Serial.println("IMU failed to start");
     while (true) { led(LED_RED, true); delay(200); led(LED_RED, false); delay(200); }
@@ -252,11 +296,14 @@ void loop() {
   if (now - lastSampleMs > 100) lastSampleMs = now;
   if (now - lastSampleMs >= 10) {
     lastSampleMs += 10;
-    const float G = 9.81f;
-    bool rep = pushSample(imu.readFloatAccelX() * G, imu.readFloatAccelY() * G, imu.readFloatAccelZ() * G, now);
+    float a[3], g[3];
+    readIMU(a, g);
+    bool streaming = connHandle != BLE_CONN_HANDLE_INVALID && streamChar.notifyEnabled();
+    if (streaming) streamSample(a, g); else streamCount = 0;
+    bool rep = pushSample(a[0], a[1], a[2], now);
     if (rep) {
       notifyReps();
-      greenUntil = now + 80;
+      if (!streaming) greenUntil = now + 80;   // while streaming, the app decides when a rep happened
       Serial.print("rep ");
       Serial.println(reps);
     }

@@ -3,12 +3,14 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var history: HistoryStore
     @EnvironmentObject var store: WorkoutStore
+    @EnvironmentObject var exercises: ExerciseStore
     @ObservedObject private var ble = ClipBLE.shared
     @AppStorage("restSeconds") private var restSeconds = 90
     @AppStorage("weightStep") private var weightStep = 2.5
     @AppStorage("defaultWeight") private var defaultWeight = 10.0
     @AppStorage("haptics") private var haptics = true
     @State private var confirmClear = false
+    @State private var confirmForget = false
     @State private var showingFind = false
 
     private var version: String {
@@ -53,6 +55,13 @@ struct SettingsView: View {
                     Button("Find my clip") { showingFind = true }
                 }
 
+                Section("Exercises") {
+                    LabeledContent("In the library", value: "\(exercises.exercises.count)")
+                    LabeledContent("Taught by you", value: "\(exercises.exercises.filter { $0.profileSource == .taught }.count)")
+                    Button("Forget everything taught", role: .destructive) { confirmForget = true }
+                        .disabled(!exercises.exercises.contains { $0.profileSource == .taught })
+                }
+
                 Section("Data") {
                     LabeledContent("Workouts saved", value: "\(store.workouts.count)")
                     LabeledContent("Sets logged", value: "\(history.sets.count)")
@@ -71,6 +80,13 @@ struct SettingsView: View {
                 Button("Delete all history", role: .destructive) { history.clear() }
             }
             .fullScreenCover(isPresented: $showingFind) { FindClipView() }
+            .confirmationDialog("Forget every taught exercise?", isPresented: $confirmForget, titleVisibility: .visible) {
+                Button("Forget taught exercises", role: .destructive) {
+                    for e in exercises.exercises where e.profileSource == .taught {
+                        exercises.forgetProfile(for: e.name)
+                    }
+                }
+            }
         }
     }
 }

@@ -27,6 +27,16 @@ struct SessionView: View {
             Text("reps")
                 .font(.title2)
                 .foregroundStyle(.secondary)
+            if session.inSet, let c = session.counter {
+                Text(c.rawValue)
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+            } else if session.tempo > 0 {
+                Text(String(format: "%.1f s per rep", session.tempo))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
 
             if !session.sets.isEmpty {
                 List(session.sets) { set in
