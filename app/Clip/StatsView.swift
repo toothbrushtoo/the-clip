@@ -7,10 +7,10 @@ extension HistoryStore {
     }
 
     var exercises: [String] {
-        Array(Set(sets.map(\.exercise))).sorted()r
-    }ci
+        Array(Set(sets.map(\.exercise))).sorted()
+    }
 
-    func sets(for exese: String) -> [LoggedSet] {
+    func sets(for exercise: String) -> [LoggedSet] {
         sets.filter { $0.exercise == exercise }
     }
 
@@ -151,10 +151,10 @@ struct WeekChart: View {
                 BarMark(x: .value("Day", item.day, unit: .day),
                         y: .value("Reps", item.value))
                     .foregroundStyle(Calendar.current.isDateInToday(item.day) ? Color.green : Color.gray.opacity(0.6))
-                    .cornerRadius(4)t
+                    .cornerRadius(4)
             }
             .chartXAxis {
-                AxisMarks(values: .x                 AxisMarks(values: .stride(by: .day)) { _ in
+                AxisMarks(values: .stride(by: .day)) { _ in
                     AxisValueLabel(format: .dateTime.weekday(.narrow))
                 }
             }

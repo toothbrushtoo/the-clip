@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SessionView: View {
     @StateObject private var session = ClipSession()
+    @EnvironmentObject var history: HistoryStore
 
     var body: some View {
         VStack(spacing: 24) {
@@ -47,7 +48,7 @@ struct SessionView: View {
                 Button("Connect") { session.connectFake() }
                     .buttonStyle(.borderedProminent)
             } else if session.inSet {
-                Button("End set") { session.endSet() }
+                Button("End set") { endQuickSet() }
                     .buttonStyle(.bordered)
             } else {
                 Button("Start set") { session.startSet() }
@@ -55,6 +56,14 @@ struct SessionView: View {
             }
         }
             .padding()
+    }
+
+    private func endQuickSet() {
+        let before = session.sets.count
+        session.endSet()
+        guard session.sets.count > before, let s = session.sets.first else { return }
+        history.log(LoggedSet(exercise: "Quick set", reps: s.reps, weightKg: 0,
+                              seconds: s.seconds, date: s.date))
     }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {

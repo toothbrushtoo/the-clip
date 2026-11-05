@@ -4,7 +4,10 @@ import Combine
 final class ClipSession: ObservableObject {
     enum Source: String, CaseIterable { case fake, phone, clip }
 
-    @Published var reps = 0
+    @Published var reps = 0 {
+        didSet { if reps > oldValue { noteRep() } }
+    }
+    @Published var tempo: Double = 0
     @Published var connected = false
     @Published var inSet = false
     @Published var source: Source = .fake {
@@ -18,6 +21,7 @@ final class ClipSession: ObservableObject {
     private var setStart: Date?
     private var bag = Set<AnyCancellable>()
     private var linkBag = Set<AnyCancellable>()
+    private var repTimes: [Date] = []
 
     func connect() {
         switch source {
@@ -42,6 +46,8 @@ final class ClipSession: ObservableObject {
     }
 
     func startSet() {
+        repTimes.removeAll()
+        tempo = 0
         reps = 0
         inSet = true
         setStart = Date()
@@ -76,6 +82,12 @@ final class ClipSession: ObservableObject {
     }
 
     func clearHistory() { sets.removeAll() }
+
+    private func noteRep() {
+        repTimes.append(Date())
+        guard let first = repTimes.first, let last = repTimes.last, repTimes.count >= 2 else { return }
+        tempo = last.timeIntervalSince(first) / Double(repTimes.count - 1)
+    }
 
     private func recordSet() {
         guard let start = setStart, reps > 0 else { return }
