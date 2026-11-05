@@ -38,7 +38,7 @@
  {
   "file": "curl_pause_7",
   "true": 7,
-  "generic": 7,
+  "generic": 6,
   "detector": "velocity",
   "threshold": 0.4602,
   "frac": null,
@@ -50,7 +50,7 @@
  {
   "file": "curl_rigid_10",
   "true": 10,
-  "generic": 10,
+  "generic": 9,
   "detector": "motion",
   "threshold": 2.8895,
   "frac": null,
@@ -115,7 +115,7 @@
  {
   "file": "junk_phone",
   "true": 0,
-  "generic": 10
+  "generic": 7
  },
  {
   "file": "junk_walk",
@@ -125,7 +125,7 @@
  {
   "file": "knee_raise_10",
   "true": 10,
-  "generic": 13,
+  "generic": 10,
   "detector": "velocity",
   "threshold": 0.7587,
   "frac": null,
@@ -137,7 +137,7 @@
  {
   "file": "lateral_raise_10",
   "true": 10,
-  "generic": 10,
+  "generic": 7,
   "detector": "motion",
   "threshold": 7.602,
   "frac": null,
@@ -166,19 +166,19 @@
  {
   "file": "pullup_6",
   "true": 6,
-  "generic": 8,
-  "detector": "velocity",
-  "threshold": 0.6696,
-  "frac": null,
-  "period": 3.274,
-  "gap": 0.818,
+  "generic": 7,
+  "detector": "motion",
+  "threshold": 0.0,
+  "frac": 0.65,
+  "period": 4.318,
+  "gap": 0.997,
   "width": 1,
   "self": 6
  },
  {
   "file": "pushup_10",
   "true": 10,
-  "generic": 11,
+  "generic": 10,
   "detector": "velocity",
   "threshold": 0.4602,
   "frac": null,
@@ -218,15 +218,15 @@
   "detector": "velocity",
   "threshold": 0.0,
   "frac": 0.8,
-  "period": 3.505,
-  "gap": 0.876,
+  "period": 3.516,
+  "gap": 0.879,
   "width": 1,
   "self": 10
  },
  {
   "file": "squat_bodyweight_10",
   "true": 10,
-  "generic": 11,
+  "generic": 10,
   "detector": "velocity",
   "threshold": 0.4602,
   "frac": null,
@@ -246,5 +246,53 @@
   "gap": 0.462,
   "width": 3,
   "self": 11
+ },
+ {
+  "file": "synth_curl_20",
+  "true": 20,
+  "generic": 20,
+  "detector": "rotation",
+  "threshold": 34.1252,
+  "frac": null,
+  "period": 3.0,
+  "gap": 0.75,
+  "width": 26,
+  "self": 20
+ },
+ {
+  "file": "synth_curl_flipped_20",
+  "true": 20,
+  "generic": 20,
+  "detector": "rotation",
+  "threshold": 26.2786,
+  "frac": null,
+  "period": 3.0,
+  "gap": 0.75,
+  "width": 20,
+  "self": 20
+ },
+ {
+  "file": "synth_curl_holdtop_20",
+  "true": 20,
+  "generic": 20,
+  "detector": "rotation",
+  "threshold": 34.1252,
+  "frac": null,
+  "period": 7.4,
+  "gap": 1.2,
+  "width": 26,
+  "self": 20
+ },
+ {
+  "file": "synth_curl_slow_20",
+  "true": 20,
+  "generic": 21,
+  "detector": "rotation",
+  "threshold": 34.1252,
+  "frac": null,
+  "period": 10.0,
+  "gap": 1.2,
+  "width": 25,
+  "self": 20
  }
 ]

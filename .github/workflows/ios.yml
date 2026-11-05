@@ -11,7 +11,7 @@ jobs:
       - name: Check rep engine against the Python reference
         run: |
           swiftc -O -o /tmp/repcheck app/Clip/RepEngine.swift tools/rep_engine_check/main.swift
-          /tmp/repcheck hardware/data/phyphox tools/rep_engine_check/reference.json
+          /tmp/repcheck hardware/data/phyphox,hardware/data/synthetic tools/rep_engine_check/reference.json
       - name: install XcodeGen
         run: brew install xcodegen
       - name: Generate project

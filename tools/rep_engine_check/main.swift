@@ -28,20 +28,25 @@ func loadCSV(_ path: String) -> [MotionSample] {
     for line in text.split(whereSeparator: { $0 == "\n" || $0 == "\r\n" }).dropFirst() {
         let cols = line.split(separator: ",").map { Double($0.trimmingCharacters(in: .whitespaces)) }
         guard cols.count >= 4, let t = cols[0], let ax = cols[1], let ay = cols[2], let az = cols[3] else { continue }
-        out.append(MotionSample(t: t, ax: ax, ay: ay, az: az, gx: 0, gy: 0, gz: 0))
+        // phyphox files have a 5th "absolute" column; app and synthetic files have gx, gy, gz
+        if cols.count >= 7, let gx = cols[4], let gy = cols[5], let gz = cols[6] {
+            out.append(MotionSample(t: t, ax: ax, ay: ay, az: az, gx: gx, gy: gy, gz: gz))
+        } else {
+            out.append(MotionSample(t: t, ax: ax, ay: ay, az: az, gx: 0, gy: 0, gz: 0))
+        }
     }
     return out
 }
 
 let args = CommandLine.arguments
-guard args.count >= 3 else { print("usage: repcheck <csv dir> <reference.json>"); exit(2) }
-let dir = args[1]
+guard args.count >= 3 else { print("usage: repcheck <csv dir[,dir...]> <reference.json>"); exit(2) }
+let dirs = args[1].split(separator: ",").map(String.init)
 let refs = try! JSONDecoder().decode([Ref].self, from: Data(contentsOf: URL(fileURLWithPath: args[2])))
 var failures = 0
 var genericError = 0
 print(String(format: "%-22@ %5@ %8@ %6@ %10@ %6@ %6@", "file", "true", "generic", "ref", "learned", "self", "ref"))
 for r in refs {
-    let samples = loadCSV("\(dir)/\(r.file).csv")
+    let samples = dirs.lazy.map { loadCSV("\($0)/\(r.file).csv") }.first { !$0.isEmpty } ?? []
     guard !samples.isEmpty else { print("\(r.file): missing"); failures += 1; continue }
     let engine = RepEngine()
     for s in samples { engine.push(s) }

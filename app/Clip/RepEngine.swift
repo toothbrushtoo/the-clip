@@ -71,7 +71,11 @@ enum RepConstants {
     static let rotTmin = 20.0
     static let velHighPass = 2.0
     static let velLeak = 2.0
-    static let angleLeak = 8.0
+    static let gravityTau = 1.0      // s, how fast the gyro-tracked gravity direction is pulled back to the accelerometer
+    static let stillDps = 15.0       // deg/s, below this the clip counts as still
+    static let stillFor = 1.5        // s, still this long before the rest direction starts to follow
+    static let restTau = 1.0         // s, how fast the rest direction follows while still
+    static let restMaxTilt = 45.0    // degrees, the rest direction only follows small drifts, never a hold at the top
     static let detectors: [ExerciseProfile.Detector] = [.rotation, .motion, .velocity]
 }
 
@@ -147,13 +151,17 @@ final class AxisTracker {
     }
 }
 
-// Peak detector with hysteresis. The threshold is fixed, or adapts to the biggest recent swing.
+// Turning-point detector with hysteresis. Confirms a peak once the signal has fallen T below it
+// and a trough once it has risen T above it, each with the size of the swing that led to it. The
+// threshold is fixed, or adapts to the biggest recent swing. A rep is one hill, so `push` returns
+// true on a confirmed peak with a full swing; troughs only keep the bookkeeping straight.
 final class ZigZag {
     var tmin: Double
     var frac: Double
     var fixed: Double?
     private var initialised = false
     private var extreme = 0.0
+    private var peak = 0.0
     private var trough = 0.0
     private var dir = 0
     private(set) var env = 0.0
@@ -174,6 +182,7 @@ final class ZigZag {
         if !initialised {
             initialised = true
             extreme = x
+            peak = x
             trough = x
             return false
         }
@@ -190,6 +199,7 @@ final class ZigZag {
                     lastSwing = swing
                     env = max(env, swing)
                 }
+                peak = extreme
                 dir = -1
                 extreme = x
             }
@@ -197,6 +207,10 @@ final class ZigZag {
             if x < extreme {
                 extreme = x
             } else if x - extreme > t {
+                let swing = peak - extreme
+                if swing >= t {
+                    env = max(env, swing)
+                }
                 trough = extreme
                 dir = 1
                 extreme = x
@@ -223,9 +237,10 @@ final class RepEngine {
     private let axisA = AxisTracker(prior: [0.0, 0.0, 1.0])
     private let axisV = AxisTracker(prior: [0.0, 0.0, 1.0])
     private var bias = [0.0, 0.0, 0.0]
-    private var theta = 0.0
     private(set) var omegaEnv = 0.0
-    private let axisG = AxisTracker(prior: [1.0, 0.0, 0.0])
+    private var gEst: [Double]?
+    private var gRest = [0.0, 0.0, 1.0]
+    private var stillFor = 0.0
     private(set) var zigzags: [ExerciseProfile.Detector: ZigZag]
     private(set) var minGap = 0.6
     private(set) var projection: [ExerciseProfile.Detector: Double] = [.rotation: 0, .motion: 0, .velocity: 0]
@@ -286,6 +301,10 @@ final class RepEngine {
         projection[.motion] = axisA.project(band)
         projection[.velocity] = axisV.project(vel)
 
+        // Rotation: how far the clip has tilted from its resting direction, in degrees. Gravity's
+        // direction in the clip's frame is tracked with the gyro (fast, drifts) and corrected by the
+        // accelerometer (slow, no drift). It is an angle, so it reads the same whichever way the
+        // clip is mounted and whichever way the rep turns.
         var wc = [0.0, 0.0, 0.0]
         let still = abs(g[0] - bias[0]) < 20.0 && abs(g[1] - bias[1]) < 20.0 && abs(g[2] - bias[2]) < 20.0
         let alpha = still ? 0.004 : 0.0002
@@ -293,13 +312,43 @@ final class RepEngine {
             bias[k] += (g[k] - bias[k]) * alpha
             wc[k] = g[k] - bias[k]
         }
-        axisG.push(wc)
-        let omega = axisG.project(wc)
-        theta += omega * dt
-        theta -= theta * dt / RepConstants.angleLeak
-        projection[.rotation] = theta
         let mag = (wc[0] * wc[0] + wc[1] * wc[1] + wc[2] * wc[2]).squareRoot()
         omegaEnv = max(mag, omegaEnv * (1.0 - dt / 3.0))
+
+        var an = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).squareRoot()
+        if an == 0 { an = 1 }
+        let au = [a[0] / an, a[1] / an, a[2] / an]
+        if gEst == nil {
+            gEst = au
+            gRest = au
+        } else {
+            // rotate the gravity estimate by the gyro: in the clip's frame, dg/dt = -omega x g
+            let w = [wc[0] * Double.pi / 180, wc[1] * Double.pi / 180, wc[2] * Double.pi / 180]
+            var ge = gEst!
+            let cross = [w[1] * ge[2] - w[2] * ge[1], w[2] * ge[0] - w[0] * ge[2], w[0] * ge[1] - w[1] * ge[0]]
+            for k in 0..<3 { ge[k] = ge[k] - cross[k] * dt }
+            // then nudge it toward the accelerometer
+            let kAcc = dt / RepConstants.gravityTau
+            for k in 0..<3 { ge[k] = ge[k] + (au[k] - ge[k]) * kAcc }
+            var n = (ge[0] * ge[0] + ge[1] * ge[1] + ge[2] * ge[2]).squareRoot()
+            if n == 0 { n = 1 }
+            gEst = [ge[0] / n, ge[1] / n, ge[2] / n]
+        }
+        let ge = gEst!
+        let dot = ge[0] * gRest[0] + ge[1] * gRest[1] + ge[2] * gRest[2]
+        let tilt = acos(max(-1.0, min(1.0, dot))) * 180 / Double.pi
+        // The rest direction follows the clip once it has been still for a while, but only near
+        // where it already was: a pause at the top of a rep must not become the new rest.
+        if mag < RepConstants.stillDps { stillFor += dt } else { stillFor = 0 }
+        if stillFor >= RepConstants.stillFor && tilt < RepConstants.restMaxTilt {
+            let kRest = dt / RepConstants.restTau
+            var gr = gRest
+            for k in 0..<3 { gr[k] = gr[k] + (ge[k] - gr[k]) * kRest }
+            var n = (gr[0] * gr[0] + gr[1] * gr[1] + gr[2] * gr[2]).squareRoot()
+            if n == 0 { n = 1 }
+            gRest = [gr[0] / n, gr[1] / n, gr[2] / n]
+        }
+        projection[.rotation] = tilt
 
         var fired: [ExerciseProfile.Detector: Bool] = [:]
         for d in RepConstants.detectors {

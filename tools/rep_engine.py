@@ -26,7 +26,11 @@ VEL_TMIN = 0.2     # m/s, smallest velocity swing that can be a rep (generic mod
 ROT_TMIN = 20.0    # degrees, smallest rotation swing that can be a rep (generic mode)
 VEL_HP = 2.0       # s, high-pass before integrating to velocity
 VEL_LEAK = 2.0     # s, velocity drift leak
-ANGLE_LEAK = 8.0   # s, angle drift leak
+GRAVITY_TAU = 1.0  # s, how fast the gyro-tracked gravity direction is pulled back to the accelerometer
+STILL_DPS = 15.0   # deg/s, below this the clip counts as still
+STILL_FOR = 1.5    # s, still this long before the rest direction starts to follow
+REST_TAU = 1.0     # s, how fast the rest direction follows while still
+REST_MAX_TILT = 45.0  # degrees, the rest direction only follows small drifts, never a hold at the top
 DETECTORS = ('rotation', 'motion', 'velocity')
 
 
@@ -80,8 +84,10 @@ class Axis:
 
 
 class ZigZag:
-    """Peak detector with hysteresis. Threshold is fixed, or adapts to the
-    biggest recent swing (frac * env, never below tmin)."""
+    """Turning-point detector with hysteresis. Reports a peak once the signal has fallen T
+    below it, and a trough once the signal has risen T above it, each with the size of the
+    swing that led to it. The threshold is fixed, or adapts to the biggest recent swing
+    (frac * env, never below tmin)."""
 
     def __init__(self, tmin, frac, fixed_t=None):
         self.tmin = tmin
@@ -92,10 +98,10 @@ class ZigZag:
     def reset(self):
         self.init = False
         self.extreme = 0.0
+        self.peak = 0.0
         self.trough = 0.0
         self.dir = 0
         self.env = 0.0
-        self.last_swing = 0.0
 
     @property
     def threshold(self):
@@ -104,33 +110,62 @@ class ZigZag:
         return max(self.tmin, self.frac * self.env)
 
     def push(self, x, dt):
+        """Returns None, or (kind, value, swing) with kind 'peak' or 'trough'."""
         if not self.init:
             self.init = True
             self.extreme = x
+            self.peak = x
             self.trough = x
-            return False
+            return None
         self.env *= 1.0 - dt / 20.0
         t = self.threshold
-        rep = False
+        event = None
         if self.dir >= 0:
             if x > self.extreme:
                 self.extreme = x
             elif self.extreme - x > t:
                 swing = self.extreme - self.trough
                 if swing >= t:
-                    rep = True
-                    self.last_swing = swing
+                    event = ('peak', self.extreme, swing)
                     self.env = max(self.env, swing)
+                self.peak = self.extreme
                 self.dir = -1
                 self.extreme = x
         else:
             if x < self.extreme:
                 self.extreme = x
             elif x - self.extreme > t:
+                swing = self.peak - self.extreme
+                if swing >= t:
+                    event = ('trough', self.extreme, swing)
+                    self.env = max(self.env, swing)
                 self.trough = self.extreme
                 self.dir = 1
                 self.extreme = x
-        return rep
+        return event
+
+
+class PeakCounter:
+    """A rep is one hill: counted when the ZigZag confirms a peak with a full swing."""
+
+    def __init__(self, zz):
+        self.zz = zz
+        self.last_swing = 0.0
+
+    @property
+    def threshold(self):
+        return self.zz.threshold
+
+    @property
+    def env(self):
+        return self.zz.env
+
+    def push(self, x, dt):
+        event = self.zz.push(x, dt)
+        if event is None or event[0] != 'peak':
+            return False
+        self.last_swing = event[2]
+        return True
 
 
 class RepEngine:
@@ -152,18 +187,22 @@ class RepEngine:
         self.vel = [0.0, 0.0, 0.0]
         self.axis_a = Axis(prior=(0.0, 0.0, 1.0))
         self.axis_v = Axis(prior=(0.0, 0.0, 1.0))
-        # gyro: bias, main axis, leaky angle
+        # rotation: how far the clip has tilted from its resting direction, in degrees.
+        # Gravity's direction in the clip's frame is tracked with the gyro (fast, drifts) and
+        # corrected by the accelerometer (slow, no drift). The rest direction follows it
+        # whenever the clip has been still for a while, so between reps the angle sits at 0.
         self.bias = [0.0, 0.0, 0.0]
-        self.theta = 0.0
+        self.g_est = None
+        self.g_rest = None
+        self.still_s = 0.0
         self.omega_env = 0.0
-        self.axis_g = Axis(prior=(1.0, 0.0, 0.0))
-        self.zz = {'rotation': ZigZag(ROT_TMIN, 0.4),
-                   'motion': ZigZag(ACC_TMIN, 0.55),
-                   'velocity': ZigZag(VEL_TMIN, 0.35)}
+        self.zz = {'rotation': PeakCounter(ZigZag(ROT_TMIN, 0.4)),
+                   'motion': PeakCounter(ZigZag(ACC_TMIN, 0.55)),
+                   'velocity': PeakCounter(ZigZag(VEL_TMIN, 0.35))}
         self.min_gap = 0.6
         p = self.profile
         if p is not None:
-            zz = self.zz[p['detector']]
+            zz = self.zz[p['detector']].zz
             if p.get('frac') is not None:
                 zz.frac = p['frac']
                 zz.fixed_t = None
@@ -201,13 +240,39 @@ class RepEngine:
         for k in range(3):
             self.bias[k] += (g[k] - self.bias[k]) * alpha
             wc[k] = g[k] - self.bias[k]
-        self.axis_g.push(wc)
-        omega = self.axis_g.project(wc)
-        self.theta += omega * dt
-        self.theta -= self.theta * dt / ANGLE_LEAK
-        self.proj['rotation'] = self.theta
         mag = math.sqrt(sum(x * x for x in wc))
         self.omega_env = max(mag, self.omega_env * (1.0 - dt / 3.0))
+
+        an = math.sqrt(sum(x * x for x in a)) or 1.0
+        au = [x / an for x in a]
+        if self.g_est is None:
+            self.g_est = list(au)
+            self.g_rest = list(au)
+        else:
+            # rotate the gravity estimate by the gyro: in the clip's frame, dg/dt = -omega x g
+            w = [math.radians(x) for x in wc]
+            ge = self.g_est
+            cross = [w[1] * ge[2] - w[2] * ge[1], w[2] * ge[0] - w[0] * ge[2], w[0] * ge[1] - w[1] * ge[0]]
+            ge = [ge[k] - cross[k] * dt for k in range(3)]
+            # then nudge it toward the accelerometer
+            k_acc = dt / GRAVITY_TAU
+            ge = [ge[k] + (au[k] - ge[k]) * k_acc for k in range(3)]
+            n = math.sqrt(sum(x * x for x in ge)) or 1.0
+            self.g_est = [x / n for x in ge]
+        dot = sum(self.g_est[k] * self.g_rest[k] for k in range(3))
+        tilt = math.degrees(math.acos(max(-1.0, min(1.0, dot))))
+        # The rest direction follows the clip once it has been still for a while, but only
+        # near where it already was: a pause at the top of a rep must not become the new rest.
+        if mag < STILL_DPS:
+            self.still_s += dt
+        else:
+            self.still_s = 0.0
+        if self.still_s >= STILL_FOR and tilt < REST_MAX_TILT:
+            k_rest = dt / REST_TAU
+            gr = [self.g_rest[k] + (self.g_est[k] - self.g_rest[k]) * k_rest for k in range(3)]
+            n = math.sqrt(sum(x * x for x in gr)) or 1.0
+            self.g_rest = [x / n for x in gr]
+        self.proj['rotation'] = tilt
 
         fired = {d: self.zz[d].push(self.proj[d], dt) for d in DETECTORS}
 
@@ -333,7 +398,7 @@ def _signals(samples):
 
 
 def _replay(times, sig, gap, fixed=None, tmin=0.0, frac=0.0):
-    zz = ZigZag(tmin, frac, fixed_t=fixed)
+    zz = PeakCounter(ZigZag(tmin, frac, fixed_t=fixed))
     last = -1e9
     rep_times, swings = [], []
     for t, x in zip(times, sig):
