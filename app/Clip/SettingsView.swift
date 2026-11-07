@@ -53,6 +53,8 @@ struct SettingsView: View {
                         LabeledContent("Signal", value: "\(r) dBm")
                     }
                     Button("Find my clip") { showingFind = true }
+                    Button("Put clip to sleep") { ble.sleep() }
+                        .disabled(ble.state != .connected)
                 }
 
                 Section("Exercises") {

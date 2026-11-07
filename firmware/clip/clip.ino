@@ -32,6 +32,15 @@ const float FRAC = 0.3f;
 const unsigned long MIN_GAP_MS = 500;
 
 const unsigned long FIND_TIMEOUT_MS = 60000;
+
+// Sleep: with no phone connected and no USB power, the clip goes into System OFF (a few µA) after
+// lying still for IDLE_STILL_MS, or after NO_PHONE_MS with no phone even if it keeps moving (in a
+// bag). The motion sensor stays on in low-power mode and wakes it when it's picked up. Plugging in
+// USB wakes it too. Small wobbles (a breeze, a bump on the table) are below both thresholds.
+const unsigned long IDLE_STILL_MS = 5UL * 60UL * 1000UL;
+const unsigned long NO_PHONE_MS = 20UL * 60UL * 1000UL;
+const float STILL_ACCEL = 0.6f;     // m/s^2: short-term change in acceleration that counts as moving
+const uint8_t WAKE_THS = 4;         // wake threshold in 31.25 mg steps (4 = 0.125 g)
 const unsigned long RSSI_PERIOD_MS = 200;
 
 float band[WINDOW][3];
@@ -54,6 +63,12 @@ unsigned long nextBlinkMs = 0;
 bool finding = false;
 unsigned long findUntilMs = 0;
 uint16_t connHandle = BLE_CONN_HANDLE_INVALID;
+
+float idleFast[3], idleSlow[3];
+bool idleInit = false;
+unsigned long lastMotionMs = 0;
+unsigned long lastPhoneMs = 0;
+bool sleepRequested = false;
 
 // One burst read gets gyro then accel (registers 0x22..0x2D) so both are from the same instant.
 void readIMU(float* a, float* g) {
@@ -197,7 +212,73 @@ void onCmd(uint16_t conn, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
     case 0x03: startFind(); break;
     case 0x04: stopFind(); break;
     case 0x07: greenUntil = millis() + 80; break;   // the app counted a rep: flash green
+    case 0x08: sleepRequested = true; break;         // the app asked the clip to sleep
   }
+}
+
+bool usbPowered() {
+  uint32_t status = 0;
+  sd_power_usbregstatus_get(&status);
+  return status & POWER_USBREGSTATUS_VBUSDETECT_Msk;
+}
+
+// Tracks whether the clip is being moved. A 0.1 s average against a 2 s average of acceleration:
+// gentle drift or a tiny wobble keeps them together, a real movement pulls them apart.
+void trackMotion(const float* a, unsigned long now) {
+  if (!idleInit) {
+    for (int k = 0; k < 3; k++) { idleFast[k] = a[k]; idleSlow[k] = a[k]; }
+    idleInit = true;
+    lastMotionMs = now;
+    return;
+  }
+  float d2 = 0;
+  for (int k = 0; k < 3; k++) {
+    idleFast[k] += (a[k] - idleFast[k]) * 0.1f;
+    idleSlow[k] += (a[k] - idleSlow[k]) * 0.005f;
+    float d = idleFast[k] - idleSlow[k];
+    d2 += d * d;
+  }
+  if (d2 > STILL_ACCEL * STILL_ACCEL) lastMotionMs = now;
+}
+
+// Motion sensor into low-power wake-up mode: accel only at 26 Hz, gyro off, a latched interrupt on
+// INT1 when the high-pass filtered acceleration goes over WAKE_THS for 2 samples in a row.
+void armWakeOnMotion() {
+  imu.writeRegister(LSM6DS3_ACC_GYRO_CTRL2_G, 0x00);
+  imu.writeRegister(LSM6DS3_ACC_GYRO_CTRL1_XL, 0x20);
+  imu.writeRegister(LSM6DS3_ACC_GYRO_CTRL6_G, 0x10);
+  imu.writeRegister(LSM6DS3_ACC_GYRO_WAKE_UP_THS, WAKE_THS & 0x3F);
+  imu.writeRegister(LSM6DS3_ACC_GYRO_WAKE_UP_DUR, 0x20);
+  imu.writeRegister(LSM6DS3_ACC_GYRO_TAP_CFG1, 0x91);
+  imu.writeRegister(LSM6DS3_ACC_GYRO_MD1_CFG, 0x20);
+  delay(100);
+  uint8_t src;
+  imu.readRegister(&src, LSM6DS3_ACC_GYRO_WAKE_UP_SRC);
+}
+
+// Undo armWakeOnMotion after waking (the motion sensor kept its settings while the chip was off).
+void disarmWakeOnMotion() {
+  imu.writeRegister(LSM6DS3_ACC_GYRO_MD1_CFG, 0x00);
+  imu.writeRegister(LSM6DS3_ACC_GYRO_TAP_CFG1, 0x00);
+  imu.writeRegister(LSM6DS3_ACC_GYRO_WAKE_UP_THS, 0x00);
+  imu.writeRegister(LSM6DS3_ACC_GYRO_WAKE_UP_DUR, 0x00);
+  imu.writeRegister(LSM6DS3_ACC_GYRO_CTRL6_G, 0x00);
+  uint8_t src;
+  imu.readRegister(&src, LSM6DS3_ACC_GYRO_WAKE_UP_SRC);
+}
+
+void goToSleep() {
+  Serial.println("sleeping");
+  Serial.flush();
+  finding = false;
+  for (int i = 0; i < 2; i++) {
+    led(LED_BLUE, true); delay(60);
+    led(LED_BLUE, false); delay(120);
+  }
+  led(LED_RED, false); led(LED_GREEN, false); led(LED_BLUE, false);
+  digitalWrite(VBAT_ENABLE, HIGH);   // stop the battery divider leaking while off
+  armWakeOnMotion();
+  systemOff(PIN_LSM6DS3TR_C_INT1, HIGH);
 }
 
 void onConnect(uint16_t conn) {
@@ -211,6 +292,7 @@ void onConnect(uint16_t conn) {
 
 void onDisconnect(uint16_t conn, uint8_t reason) {
   Serial.println("disconnected");
+  lastPhoneMs = millis();
   connHandle = BLE_CONN_HANDLE_INVALID;
   inSet = false;
   stopFind();
@@ -284,10 +366,16 @@ void setup() {
     Serial.println("IMU failed to start");
     while (true) { led(LED_RED, true); delay(200); led(LED_RED, false); delay(200); }
   }
+  disarmWakeOnMotion();
+  if (NRF_POWER->RESETREAS & POWER_RESETREAS_OFF_Msk) Serial.println("woke up on motion");
+  if (NRF_POWER->RESETREAS & POWER_RESETREAS_VBUS_Msk) Serial.println("woke up on USB");
+  NRF_POWER->RESETREAS = 0xFFFFFFFF;
 
   setupBLE();
   Serial.println("Clip ready");
   lastSampleMs = millis();
+  lastMotionMs = lastSampleMs;
+  lastPhoneMs = lastSampleMs;
 }
 
 void loop() {
@@ -298,6 +386,7 @@ void loop() {
     lastSampleMs += 10;
     float a[3], g[3];
     readIMU(a, g);
+    trackMotion(a, now);
     bool streaming = connHandle != BLE_CONN_HANDLE_INVALID && streamChar.notifyEnabled();
     if (streaming) streamSample(a, g); else streamCount = 0;
     bool rep = pushSample(a[0], a[1], a[2], now);
@@ -310,6 +399,19 @@ void loop() {
   }
 
   if (finding && now >= findUntilMs) stopFind();
+
+  bool phone = connHandle != BLE_CONN_HANDLE_INVALID;
+  if (phone) lastPhoneMs = now;
+  if (sleepRequested) {
+    sleepRequested = false;
+    if (phone) Bluefruit.disconnect(connHandle);
+    delay(200);
+    goToSleep();
+  }
+  if (!phone && !inSet && !usbPowered() &&
+      (now - lastMotionMs > IDLE_STILL_MS || now - lastPhoneMs > NO_PHONE_MS)) {
+    goToSleep();
+  }
 
   // double white flash every 600 ms while finding
   bool flash = false;

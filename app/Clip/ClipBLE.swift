@@ -121,6 +121,7 @@ final class ClipBLE: NSObject, ObservableObject {
     func find() { send(0x03) }
     func stopFind() { send(0x04) }
     func flashRep() { sendNoResponse(0x07) }
+    func sleep() { send(0x08) }
 
     private func scan() {
         guard central.state == .poweredOn, wantsConnection, clip == nil else { return }
