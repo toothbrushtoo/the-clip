@@ -40,7 +40,10 @@ const unsigned long FIND_TIMEOUT_MS = 60000;
 const unsigned long IDLE_STILL_MS = 5UL * 60UL * 1000UL;
 const unsigned long NO_PHONE_MS = 20UL * 60UL * 1000UL;
 const float STILL_ACCEL = 0.6f;     // m/s^2: short-term change in acceleration that counts as moving
-const uint8_t WAKE_THS = 4;         // wake threshold in 31.25 mg steps (4 = 0.125 g)
+const uint8_t WAKE_THS = 5;         // wake threshold in 31.25 mg steps (5 = 0.156 g)
+// After a wake on motion, the clip goes back to sleep quickly unless it's really being moved or a
+// phone connects, so a false wake (a bump, a vibration) costs seconds of battery, not minutes.
+const unsigned long FALSE_WAKE_MS = 30UL * 1000UL;
 const unsigned long RSSI_PERIOD_MS = 200;
 
 float band[WINDOW][3];
@@ -69,6 +72,7 @@ bool idleInit = false;
 unsigned long lastMotionMs = 0;
 unsigned long lastPhoneMs = 0;
 bool sleepRequested = false;
+bool wokeOnMotion = false;       // until real motion or a phone, use the short false-wake timeout
 
 // One burst read gets gyro then accel (registers 0x22..0x2D) so both are from the same instant.
 void readIMU(float* a, float* g) {
@@ -238,22 +242,37 @@ void trackMotion(const float* a, unsigned long now) {
     float d = idleFast[k] - idleSlow[k];
     d2 += d * d;
   }
-  if (d2 > STILL_ACCEL * STILL_ACCEL) lastMotionMs = now;
+  if (d2 > STILL_ACCEL * STILL_ACCEL) {
+    lastMotionMs = now;
+    wokeOnMotion = false;
+  }
 }
 
 // Motion sensor into low-power wake-up mode: accel only at 26 Hz, gyro off, a latched interrupt on
 // INT1 when the high-pass filtered acceleration goes over WAKE_THS for 2 samples in a row.
-void armWakeOnMotion() {
+// Uses the slope filter (difference between consecutive samples), which has no settling time, so
+// changing the sensor's mode doesn't fire the interrupt by itself. Returns false if INT1 won't
+// stay low, because sleeping with it high would wake the clip straight away.
+bool armWakeOnMotion() {
+  imu.writeRegister(LSM6DS3_ACC_GYRO_INT1_CTRL, 0x00);
   imu.writeRegister(LSM6DS3_ACC_GYRO_CTRL2_G, 0x00);
   imu.writeRegister(LSM6DS3_ACC_GYRO_CTRL1_XL, 0x20);
   imu.writeRegister(LSM6DS3_ACC_GYRO_CTRL6_G, 0x10);
   imu.writeRegister(LSM6DS3_ACC_GYRO_WAKE_UP_THS, WAKE_THS & 0x3F);
   imu.writeRegister(LSM6DS3_ACC_GYRO_WAKE_UP_DUR, 0x20);
-  imu.writeRegister(LSM6DS3_ACC_GYRO_TAP_CFG1, 0x91);
-  imu.writeRegister(LSM6DS3_ACC_GYRO_MD1_CFG, 0x20);
-  delay(100);
+  imu.writeRegister(LSM6DS3_ACC_GYRO_TAP_CFG1, 0x81);
+  delay(200);
   uint8_t src;
   imu.readRegister(&src, LSM6DS3_ACC_GYRO_WAKE_UP_SRC);
+  imu.writeRegister(LSM6DS3_ACC_GYRO_MD1_CFG, 0x20);
+  pinMode(PIN_LSM6DS3TR_C_INT1, INPUT_PULLDOWN);
+  for (int i = 0; i < 5; i++) {
+    delay(50);
+    imu.readRegister(&src, LSM6DS3_ACC_GYRO_WAKE_UP_SRC);
+    delay(5);
+    if (digitalRead(PIN_LSM6DS3TR_C_INT1) == LOW) return true;
+  }
+  return false;
 }
 
 // Undo armWakeOnMotion after waking (the motion sensor kept its settings while the chip was off).
@@ -271,14 +290,29 @@ void goToSleep() {
   Serial.println("sleeping");
   Serial.flush();
   finding = false;
-  for (int i = 0; i < 2; i++) {
-    led(LED_BLUE, true); delay(60);
-    led(LED_BLUE, false); delay(120);
-  }
-  led(LED_RED, false); led(LED_GREEN, false); led(LED_BLUE, false);
+  led(LED_RED, false); led(LED_GREEN, false);
+  led(LED_BLUE, true); delay(30); led(LED_BLUE, false);   // one short blink: going to sleep
   digitalWrite(VBAT_ENABLE, HIGH);   // stop the battery divider leaking while off
-  armWakeOnMotion();
+  if (!armWakeOnMotion()) {
+    // The motion sensor keeps signalling; sleeping now would wake straight back up. Stay awake,
+    // undo the sleep setup, and try again later.
+    Serial.println("sleep cancelled: motion sensor busy");
+    disarmWakeOnMotion();
+    imu.begin();
+    digitalWrite(VBAT_ENABLE, LOW);
+    lastMotionMs = millis();
+    lastPhoneMs = millis();
+    wokeOnMotion = false;
+    return;
+  }
   systemOff(PIN_LSM6DS3TR_C_INT1, HIGH);
+  // systemOff should never return. If it does, don't try again in a tight loop.
+  Serial.println("sleep failed");
+  disarmWakeOnMotion();
+  imu.begin();
+  digitalWrite(VBAT_ENABLE, LOW);
+  lastMotionMs = millis();
+  lastPhoneMs = millis();
 }
 
 void onConnect(uint16_t conn) {
@@ -367,7 +401,10 @@ void setup() {
     while (true) { led(LED_RED, true); delay(200); led(LED_RED, false); delay(200); }
   }
   disarmWakeOnMotion();
-  if (NRF_POWER->RESETREAS & POWER_RESETREAS_OFF_Msk) Serial.println("woke up on motion");
+  if (NRF_POWER->RESETREAS & POWER_RESETREAS_OFF_Msk) {
+    Serial.println("woke up on motion");
+    wokeOnMotion = true;
+  }
   if (NRF_POWER->RESETREAS & POWER_RESETREAS_VBUS_Msk) Serial.println("woke up on USB");
   NRF_POWER->RESETREAS = 0xFFFFFFFF;
 
@@ -401,15 +438,26 @@ void loop() {
   if (finding && now >= findUntilMs) stopFind();
 
   bool phone = connHandle != BLE_CONN_HANDLE_INVALID;
-  if (phone) lastPhoneMs = now;
+  if (phone) {
+    lastPhoneMs = now;
+    wokeOnMotion = false;
+  }
   if (sleepRequested) {
     sleepRequested = false;
     if (phone) Bluefruit.disconnect(connHandle);
     delay(200);
     goToSleep();
   }
+  // Test from the serial monitor: type s and Enter to sleep now, even on USB. Moving the clip
+  // should wake it, and the monitor (reopen it) then prints "woke up on motion".
+  if (Serial.available()) {
+    char c = Serial.read();
+    if (c == 's') goToSleep();
+  }
+
+  unsigned long stillLimit = wokeOnMotion ? FALSE_WAKE_MS : IDLE_STILL_MS;
   if (!phone && !inSet && !usbPowered() &&
-      (now - lastMotionMs > IDLE_STILL_MS || now - lastPhoneMs > NO_PHONE_MS)) {
+      (now - lastMotionMs > stillLimit || now - lastPhoneMs > NO_PHONE_MS)) {
     goToSleep();
   }
 
